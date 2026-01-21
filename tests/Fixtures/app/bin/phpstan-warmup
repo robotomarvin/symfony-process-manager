@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+
+use SymfonyProcessManager\Tests\Fixtures\App\Kernel;
+
+$rootDir = dirname(__DIR__, 4);
+
+require $rootDir . '/vendor/autoload.php';
+require_once $rootDir . '/tests/Fixtures/app/Kernel.php';
+
+$kernel = new Kernel('test', true);
+$kernel->boot();
+$kernel->getContainer();
+$kernel->shutdown();

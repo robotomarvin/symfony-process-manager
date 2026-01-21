@@ -18,6 +18,9 @@ final class BundleBootTest extends KernelTestCase
         return Kernel::class;
     }
 
+    /**
+     * @param array<string, mixed> $options
+     */
     protected static function createKernel(array $options = []): KernelInterface
     {
         $options['environment'] = $options['environment'] ?? 'test';
@@ -25,13 +28,17 @@ final class BundleBootTest extends KernelTestCase
 
         $class = static::getKernelClass();
 
+        /** @var class-string<KernelInterface> $class */
+
         return new $class($options['environment'], $options['debug']);
     }
 
     public function testKernelBootsWithBundle(): void
     {
         $peekHandler = static function (): callable|array|null {
-            $handler = set_exception_handler(static function (): void {
+            $handler = set_exception_handler(static function (
+                \Throwable $throwable
+            ): void {
             });
             restore_exception_handler();
 
@@ -39,7 +46,13 @@ final class BundleBootTest extends KernelTestCase
         };
 
         $peekErrorHandler = static function (): callable|array|null {
-            $handler = set_error_handler(static function (): void {
+            $handler = set_error_handler(static function (
+                int $errorNumber,
+                string $errorMessage,
+                string $errorFile,
+                int $errorLine
+            ): bool {
+                return false;
             });
             restore_error_handler();
 

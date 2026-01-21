@@ -36,6 +36,7 @@ final class Kernel extends BaseKernel
 
         foreach ($bundles as $class => $envs) {
             if (($envs[$this->environment] ?? $envs['all'] ?? false) === true) {
+                /** @var class-string<BundleInterface> $class */
                 yield new $class();
             }
         }
