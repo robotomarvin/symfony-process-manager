@@ -1,0 +1,19 @@
+{
+    "name": "robotomarvin/symfony-process-manager",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "SymfonyProcessManager\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Martin Bruna",
+            "email": "me@martinbruna.cz"
+        }
+    ],
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
+    }
+}
