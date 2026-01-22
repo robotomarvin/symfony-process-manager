@@ -45,6 +45,7 @@ final class Kernel extends BaseKernel
     protected function configureContainer(ContainerConfigurator $container): void
     {
         $container->import($this->getProjectDir() . '/config/packages/*.yaml');
+        $container->import($this->getProjectDir() . '/config/services.yaml');
     }
 
     protected function configureRoutes(RoutingConfigurator $routes): void

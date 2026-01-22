@@ -1,0 +1,6 @@
+services:
+    SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger:
+        class: SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger
+        file: '%kernel.project_dir%/src/StdoutJsonLogger.php'
+
+    Psr\Log\LoggerInterface: '@SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger'
