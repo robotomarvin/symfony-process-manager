@@ -1,0 +1,17 @@
+#!/usr/bin/env php
+<?php
+
+use Symfony\Bundle\FrameworkBundle\Console\Application;
+use SymfonyProcessManager\Tests\Fixtures\App\Kernel;
+
+$rootDir = dirname(__DIR__, 4);
+
+require $rootDir . '/vendor/autoload.php';
+require_once $rootDir . '/tests/Fixtures/app/Kernel.php';
+
+$env = $_SERVER['APP_ENV'] ?? 'dev';
+$debug = (bool) ($_SERVER['APP_DEBUG'] ?? ('prod' !== $env));
+
+$kernel = new Kernel($env, $debug);
+$application = new Application($kernel);
+$application->run();
