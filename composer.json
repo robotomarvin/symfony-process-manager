@@ -1,10 +1,17 @@
 {
     "name": "robotomarvin/symfony-process-manager",
     "type": "symfony-bundle",
+    "description": "Process manager for Symfony Messenger workers.",
     "license": "MIT",
     "autoload": {
         "psr-4": {
             "SymfonyProcessManager\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SymfonyProcessManager\\Tests\\": "tests/",
+            "SymfonyProcessManager\\Tests\\Fixtures\\App\\": "tests/Fixtures/app/src/"
         }
     },
     "authors": [
@@ -18,14 +25,18 @@
         "symfony/config": "^7.4",
         "symfony/console": "^7.4",
         "symfony/dependency-injection": "^7.4",
-        "symfony/http-kernel": "^7.4"
+        "symfony/http-kernel": "^7.4",
+        "symfony/messenger": "^7.4",
+        "symfony/process": "^7.4"
     },
     "require-dev": {
+        "doctrine/dbal": "^4.0",
+        "doctrine/doctrine-bundle": "^2.12",
         "phpstan/phpstan": "^1.12",
         "phpstan/phpstan-symfony": "^1.4",
         "phpunit/phpunit": "^11.5",
+        "symfony/doctrine-messenger": "^7.4",
         "symfony/framework-bundle": "^7.4",
-        "symfony/process": "^7.4",
         "symfony/yaml": "^7.4"
     }
 }

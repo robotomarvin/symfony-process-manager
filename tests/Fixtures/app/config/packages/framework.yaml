@@ -4,3 +4,9 @@ framework:
     http_method_override: false
     session:
         storage_factory_id: session.storage.factory.mock_file
+    messenger:
+        transports:
+            async: 'doctrine://default?queue_name=async'
+        routing:
+            'SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessage': async
+        stop_worker_on_signals: [SIGTERM, SIGINT]

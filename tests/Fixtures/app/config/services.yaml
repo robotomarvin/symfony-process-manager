@@ -1,6 +1,20 @@
 services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    SymfonyProcessManager\Tests\Fixtures\App\:
+        resource: '%kernel.project_dir%/src/*'
+        exclude: '%kernel.project_dir%/src/StdoutJsonLogger.php'
+
     SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger:
         class: SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger
         file: '%kernel.project_dir%/src/StdoutJsonLogger.php'
+
+    SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessageDispatcher:
+        class: SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessageDispatcher
+        file: '%kernel.project_dir%/src/Message/FixtureMessage.php'
+        autowire: true
+        autoconfigure: true
 
     Psr\Log\LoggerInterface: '@SymfonyProcessManager\Tests\Fixtures\App\StdoutJsonLogger'
