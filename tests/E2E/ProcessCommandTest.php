@@ -8,8 +8,6 @@ use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Tests\Support\ConsoleProcessRunner;
 use SymfonyProcessManager\Tests\Support\ConsoleProcessSession;
 
-require_once __DIR__ . '/../Support/ConsoleProcessRunner.php';
-
 #[CoversClass(ConsoleProcessRunner::class)]
 final class ProcessCommandTest extends TestCase
 {
