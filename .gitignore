@@ -1,3 +1,5 @@
 vendor
 .phpunit.cache
 .beads/artifacts/
+tests/Fixtures/app/var/
+tests/Fixtures/app/config/reference.php
