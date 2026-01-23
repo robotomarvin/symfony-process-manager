@@ -25,6 +25,10 @@ final class ServeCommand extends Command
     private const POLL_INTERVAL_MICROSECONDS = 200000;
 
     private readonly string $projectDir;
+    /**
+     * @var array<int, array<string, string>>
+     */
+    private array $workerOutputBuffers = [];
 
     public function __construct(
         private readonly LoggerInterface $logger,
@@ -127,7 +131,11 @@ final class ServeCommand extends Command
                         $workerMessageLimit,
                         $workerMemoryLimit
                     );
-                    $worker->process->start();
+                    $this->initializeWorkerBuffers($worker->id);
+                    $workerId = $worker->id;
+                    $worker->process->start(function (string $type, string $buffer) use ($workerId): void {
+                        $this->handleWorkerOutput($workerId, $type, $buffer);
+                    });
                     $worker->stopSignalSent = false;
                     $this->logger->info('Worker started.', [
                         'worker' => $worker->id,
@@ -148,6 +156,7 @@ final class ServeCommand extends Command
 
                 $exitCode = $worker->process->getExitCode();
                 $pid = $worker->process->getPid();
+                $this->flushWorkerBuffers($worker->id);
                 $worker->process = null;
 
                 $exitCode = $exitCode ?? 1;
@@ -250,8 +259,99 @@ final class ServeCommand extends Command
 
         $process->setTimeout(null);
         $process->setIdleTimeout(null);
+        $process->enableOutput();
 
         return $process;
+    }
+
+    private function initializeWorkerBuffers(int $workerId): void
+    {
+        if (!isset($this->workerOutputBuffers[$workerId])) {
+            $this->workerOutputBuffers[$workerId] = [
+                Process::OUT => '',
+                Process::ERR => '',
+            ];
+        }
+    }
+
+    private function handleWorkerOutput(int $workerId, string $type, string $buffer): void
+    {
+        $this->initializeWorkerBuffers($workerId);
+        $this->workerOutputBuffers[$workerId][$type] .= $buffer;
+
+        while (($newlinePosition = strpos($this->workerOutputBuffers[$workerId][$type], "\n")) !== false) {
+            $line = substr($this->workerOutputBuffers[$workerId][$type], 0, $newlinePosition);
+            $this->workerOutputBuffers[$workerId][$type] = substr(
+                $this->workerOutputBuffers[$workerId][$type],
+                $newlinePosition + 1
+            );
+            $line = rtrim($line, "\r");
+            $this->forwardWorkerLine($workerId, $type, $line);
+        }
+    }
+
+
+    private function flushWorkerBuffers(int $workerId): void
+    {
+        if (!isset($this->workerOutputBuffers[$workerId])) {
+            return;
+        }
+
+        foreach ([Process::OUT, Process::ERR] as $type) {
+            $buffer = $this->workerOutputBuffers[$workerId][$type];
+
+            if ($buffer === '') {
+                continue;
+            }
+
+            $line = rtrim($buffer, "\r\n");
+
+            if ($line !== '') {
+                $this->forwardWorkerLine($workerId, $type, $line);
+            }
+
+            $this->workerOutputBuffers[$workerId][$type] = '';
+        }
+    }
+
+    private function forwardWorkerLine(int $workerId, string $type, string $line): void
+    {
+        $payload = $this->formatWorkerLine($workerId, $line);
+        $stream = $type === Process::ERR ? STDERR : STDOUT;
+        fwrite($stream, $payload . PHP_EOL);
+        fflush($stream);
+    }
+
+    private function formatWorkerLine(int $workerId, string $line): string
+    {
+        $decoded = json_decode($line, true);
+
+        if (is_array($decoded) && $this->isAssociativeArray($decoded)) {
+            $extra = $decoded['extra'] ?? null;
+            $decoded['extra'] = is_array($extra) ? $extra : [];
+            $decoded['extra']['worker_id'] = $workerId;
+            $encoded = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+            if ($encoded !== false) {
+                return $encoded;
+            }
+        }
+
+        return sprintf('[worker %d] %s', $workerId, $line);
+    }
+
+    /**
+     * @param array<mixed> $value
+     */
+    private function isAssociativeArray(array $value): bool
+    {
+        foreach (array_keys($value) as $key) {
+            if (!is_int($key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

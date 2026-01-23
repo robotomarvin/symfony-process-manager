@@ -23,5 +23,6 @@ final class StdoutJsonLogger implements LoggerInterface
         }
 
         fwrite(STDOUT, $payload . PHP_EOL);
+        fflush(STDOUT);
     }
 }

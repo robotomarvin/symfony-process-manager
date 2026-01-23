@@ -116,7 +116,7 @@ final class ConsoleProcessRunner
             $decoded = json_decode($line, true);
 
             if (!is_array($decoded) || !isset($decoded['level'])) {
-                throw new RuntimeException(sprintf('Unable to parse log line: %s', $line));
+                continue;
             }
 
             $records[] = [
@@ -231,7 +231,7 @@ final class ConsoleProcessSession
             $decoded = json_decode($line, true);
 
             if (!is_array($decoded) || !isset($decoded['level'])) {
-                throw new RuntimeException(sprintf('Unable to parse log line: %s', $line));
+                continue;
             }
 
             $record = [
