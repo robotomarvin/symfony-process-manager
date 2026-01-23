@@ -151,6 +151,51 @@ final class ProcessCommandTest extends TestCase
         }
     }
 
+    public function testWorkerJsonLogsIncludeWorkerId(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve', ['--workers=1']);
+
+        try {
+            $this->waitForWorkerStart($session, 5.0);
+            $payload = 'worker-id-check';
+            $this->dispatchFixtureMessages(1, $payload);
+
+            $logLine = $this->waitForStdoutJsonLine(
+                $session,
+                static fn (array $record): bool => ($record['message'] ?? null) === 'Fixture message handled.'
+                    && ($record['context']['payload'] ?? null) === $payload,
+                5.0
+            );
+
+            self::assertIsArray($logLine['extra'] ?? null);
+            self::assertSame(1, $logLine['extra']['worker_id'] ?? null);
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testWorkerOutputPrefixesNonJsonLines(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve', ['--workers=1']);
+
+        try {
+            $this->waitForWorkerStart($session, 5.0);
+            $this->dispatchFixtureMessages(1, 'stdout:plain');
+
+            $line = $this->waitForStdoutLine(
+                $session,
+                static fn (string $stdoutLine): bool => str_contains($stdoutLine, '[worker 1] fixture plain output'),
+                5.0
+            );
+
+            self::assertSame('[worker 1] fixture plain output', $line);
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     /**
      * @return array{level: string, message: string, context: array<string, mixed>}
      */
@@ -168,6 +213,87 @@ final class ProcessCommandTest extends TestCase
             $session->signal(SIGTERM);
             $session->waitForExit(10.0);
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function waitForStdoutJsonLine(ConsoleProcessSession $session, callable $predicate, float $timeout): array
+    {
+        $start = microtime(true);
+        $offset = 0;
+        $buffer = '';
+
+        while ((microtime(true) - $start) < $timeout) {
+            $session->collectRecords();
+            $stdout = $session->getStdout();
+            $length = strlen($stdout);
+
+            if ($length > $offset) {
+                $buffer .= substr($stdout, $offset);
+                $offset = $length;
+            }
+
+            while (($newlinePosition = strpos($buffer, "\n")) !== false) {
+                $line = substr($buffer, 0, $newlinePosition);
+                $buffer = substr($buffer, $newlinePosition + 1);
+                $line = trim($line);
+
+                if ($line === '') {
+                    continue;
+                }
+
+                $decoded = json_decode($line, true);
+
+                if (!is_array($decoded)) {
+                    continue;
+                }
+
+                if ($predicate($decoded)) {
+                    return $decoded;
+                }
+            }
+
+            usleep(100000);
+        }
+
+        throw new \RuntimeException('Timed out waiting for JSON stdout line.');
+    }
+
+    private function waitForStdoutLine(ConsoleProcessSession $session, callable $predicate, float $timeout): string
+    {
+        $start = microtime(true);
+        $offset = 0;
+        $buffer = '';
+
+        while ((microtime(true) - $start) < $timeout) {
+            $session->collectRecords();
+            $stdout = $session->getStdout();
+            $length = strlen($stdout);
+
+            if ($length > $offset) {
+                $buffer .= substr($stdout, $offset);
+                $offset = $length;
+            }
+
+            while (($newlinePosition = strpos($buffer, "\n")) !== false) {
+                $line = substr($buffer, 0, $newlinePosition);
+                $buffer = substr($buffer, $newlinePosition + 1);
+                $line = trim($line);
+
+                if ($line === '') {
+                    continue;
+                }
+
+                if ($predicate($line)) {
+                    return $line;
+                }
+            }
+
+            usleep(100000);
+        }
+
+        throw new \RuntimeException('Timed out waiting for stdout line.');
     }
 
     private function signalPid(int $pid, int $signal): void
