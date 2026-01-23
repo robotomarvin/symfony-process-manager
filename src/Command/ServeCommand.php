@@ -8,8 +8,9 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\HttpKernel\KernelInterface;
-use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
+use SymfonyProcessManager\Command\Serve\WorkerProcessFactory;
+use SymfonyProcessManager\Command\Serve\WorkerState;
 
 #[AsCommand(
     name: 'pm:serve',
@@ -24,18 +25,12 @@ final class ServeCommand extends Command
     private const BACKOFF_MAX_SECONDS = 30;
     private const POLL_INTERVAL_MICROSECONDS = 200000;
 
-    private readonly string $projectDir;
-    /**
-     * @var array<int, array<string, string>>
-     */
-    private array $workerOutputBuffers = [];
-
     public function __construct(
         private readonly LoggerInterface $logger,
-        KernelInterface $kernel
+        private readonly WorkerProcessFactory $processFactory,
+        private readonly WorkerOutputHandler $outputHandler
     )
     {
-        $this->projectDir = $kernel->getProjectDir();
         parent::__construct();
     }
 
@@ -126,15 +121,14 @@ final class ServeCommand extends Command
                         continue;
                     }
 
-                    $worker->process = $this->createWorkerProcess(
+                    $worker->process = $this->processFactory->create(
                         $workerTimeLimit,
                         $workerMessageLimit,
                         $workerMemoryLimit
                     );
-                    $this->initializeWorkerBuffers($worker->id);
                     $workerId = $worker->id;
                     $worker->process->start(function (string $type, string $buffer) use ($workerId): void {
-                        $this->handleWorkerOutput($workerId, $type, $buffer);
+                        $this->outputHandler->handleOutput($workerId, $type, $buffer);
                     });
                     $worker->stopSignalSent = false;
                     $this->logger->info('Worker started.', [
@@ -156,7 +150,7 @@ final class ServeCommand extends Command
 
                 $exitCode = $worker->process->getExitCode();
                 $pid = $worker->process->getPid();
-                $this->flushWorkerBuffers($worker->id);
+                $this->outputHandler->flush($worker->id);
                 $worker->process = null;
 
                 $exitCode = $exitCode ?? 1;
@@ -231,154 +225,4 @@ final class ServeCommand extends Command
         }
     }
 
-    private function createWorkerProcess(
-        ?int $workerTimeLimit,
-        ?int $workerMessageLimit,
-        ?string $workerMemoryLimit
-    ): Process
-    {
-        $command = [
-            PHP_BINARY,
-            $this->projectDir . '/bin/console',
-            'messenger:consume',
-        ];
-
-        if ($workerTimeLimit !== null) {
-            $command[] = sprintf('--time-limit=%d', $workerTimeLimit);
-        }
-
-        if ($workerMessageLimit !== null) {
-            $command[] = sprintf('--limit=%d', $workerMessageLimit);
-        }
-
-        if ($workerMemoryLimit !== null) {
-            $command[] = sprintf('--memory-limit=%s', $workerMemoryLimit);
-        }
-
-        $process = new Process($command, $this->projectDir);
-
-        $process->setTimeout(null);
-        $process->setIdleTimeout(null);
-        $process->enableOutput();
-
-        return $process;
-    }
-
-    private function initializeWorkerBuffers(int $workerId): void
-    {
-        if (!isset($this->workerOutputBuffers[$workerId])) {
-            $this->workerOutputBuffers[$workerId] = [
-                Process::OUT => '',
-                Process::ERR => '',
-            ];
-        }
-    }
-
-    private function handleWorkerOutput(int $workerId, string $type, string $buffer): void
-    {
-        $this->initializeWorkerBuffers($workerId);
-        $this->workerOutputBuffers[$workerId][$type] .= $buffer;
-
-        while (($newlinePosition = strpos($this->workerOutputBuffers[$workerId][$type], "\n")) !== false) {
-            $line = substr($this->workerOutputBuffers[$workerId][$type], 0, $newlinePosition);
-            $this->workerOutputBuffers[$workerId][$type] = substr(
-                $this->workerOutputBuffers[$workerId][$type],
-                $newlinePosition + 1
-            );
-            $line = rtrim($line, "\r");
-            $this->forwardWorkerLine($workerId, $type, $line);
-        }
-    }
-
-
-    private function flushWorkerBuffers(int $workerId): void
-    {
-        if (!isset($this->workerOutputBuffers[$workerId])) {
-            return;
-        }
-
-        foreach ([Process::OUT, Process::ERR] as $type) {
-            $buffer = $this->workerOutputBuffers[$workerId][$type];
-
-            if ($buffer === '') {
-                continue;
-            }
-
-            $line = rtrim($buffer, "\r\n");
-
-            if ($line !== '') {
-                $this->forwardWorkerLine($workerId, $type, $line);
-            }
-
-            $this->workerOutputBuffers[$workerId][$type] = '';
-        }
-    }
-
-    private function forwardWorkerLine(int $workerId, string $type, string $line): void
-    {
-        $payload = $this->formatWorkerLine($workerId, $line);
-        $stream = $type === Process::ERR ? STDERR : STDOUT;
-        fwrite($stream, $payload . PHP_EOL);
-        fflush($stream);
-    }
-
-    private function formatWorkerLine(int $workerId, string $line): string
-    {
-        $decoded = json_decode($line, true);
-
-        if (is_array($decoded) && $this->isAssociativeArray($decoded)) {
-            $extra = $decoded['extra'] ?? null;
-            $decoded['extra'] = is_array($extra) ? $extra : [];
-            $decoded['extra']['worker_id'] = $workerId;
-            $encoded = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
-            if ($encoded !== false) {
-                return $encoded;
-            }
-        }
-
-        return sprintf('[worker %d] %s', $workerId, $line);
-    }
-
-    /**
-     * @param array<mixed> $value
-     */
-    private function isAssociativeArray(array $value): bool
-    {
-        foreach (array_keys($value) as $key) {
-            if (!is_int($key)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-}
-
-final class WorkerState
-{
-    /**
-     * @param array<int, float> $failureTimestamps
-     */
-    public function __construct(
-        public readonly int $id,
-        public ?Process $process,
-        public array $failureTimestamps,
-        public float $nextStartAt,
-        public bool $stopped,
-        public bool $stopSignalSent
-    ) {
-    }
-
-    public static function create(int $id): self
-    {
-        return new self(
-            $id,
-            null,
-            [],
-            0.0,
-            false,
-            false
-        );
-    }
 }

@@ -5,3 +5,7 @@ services:
 
     SymfonyProcessManager\Command\ServeCommand:
         tags: ['console.command']
+
+    SymfonyProcessManager\Command\Serve\WorkerProcessFactory: ~
+    SymfonyProcessManager\Command\Serve\WorkerOutputFormatter: ~
+    SymfonyProcessManager\Command\Serve\WorkerOutputHandler: ~
