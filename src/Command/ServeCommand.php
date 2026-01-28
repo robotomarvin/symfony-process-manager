@@ -16,7 +16,7 @@ use SymfonyProcessManager\Command\Serve\WorkerState;
 
 #[AsCommand(
     name: 'pm:serve',
-    description: 'Run the process manager server.'
+    description: 'Run the process manager server.',
 )]
 final class ServeCommand extends Command
 {
@@ -30,9 +30,8 @@ final class ServeCommand extends Command
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactory $processFactory,
-        private readonly WorkerOutputHandler $outputHandler
-    )
-    {
+        private readonly WorkerOutputHandler $outputHandler,
+    ) {
         parent::__construct();
     }
 
@@ -43,28 +42,28 @@ final class ServeCommand extends Command
             null,
             InputOption::VALUE_REQUIRED,
             'Number of worker processes to spawn.',
-            (string) self::DEFAULT_WORKER_COUNT
+            (string) self::DEFAULT_WORKER_COUNT,
         );
         $this->addOption(
             'worker-time-limit',
             null,
             InputOption::VALUE_REQUIRED,
             'Time limit in seconds for worker processes.',
-            null
+            null,
         );
         $this->addOption(
             'worker-message-limit',
             null,
             InputOption::VALUE_REQUIRED,
             'Message limit for worker processes.',
-            null
+            null,
         );
         $this->addOption(
             'worker-memory-limit',
             null,
             InputOption::VALUE_REQUIRED,
             'Memory limit for worker processes (e.g. 128M).',
-            null
+            null,
         );
     }
 
@@ -118,7 +117,7 @@ final class ServeCommand extends Command
                     $worker->setProcess($this->processFactory->create(
                         $workerTimeLimit,
                         $workerMessageLimit,
-                        $workerMemoryLimit
+                        $workerMemoryLimit,
                     ));
                     $workerId = $worker->id;
                     $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {
@@ -184,7 +183,7 @@ final class ServeCommand extends Command
 
                 $delaySeconds = min(
                     self::BACKOFF_BASE_SECONDS * (2 ** ($failureCount - 1)),
-                    self::BACKOFF_MAX_SECONDS
+                    self::BACKOFF_MAX_SECONDS,
                 );
 
                 $worker->scheduleRestart($now, $delaySeconds);

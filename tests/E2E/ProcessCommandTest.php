@@ -27,8 +27,8 @@ final class ProcessCommandTest extends TestCase
             $this->waitForWorkerStart($session, 5.0);
             $session->signal(SIGTERM);
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Process manager shutting down.',
-                5.0
+                static fn(array $record): bool => $record['message'] === 'Process manager shutting down.',
+                5.0,
             );
             self::assertSame(0, $session->waitForExit(5.0));
         } finally {
@@ -46,21 +46,21 @@ final class ProcessCommandTest extends TestCase
             $this->dispatchFixtureMessages(1, 'message');
 
             $exitRecord = $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker exited.'
+                static fn(array $record): bool => $record['message'] === 'Worker exited.'
                     && ($record['context']['exit_code'] ?? null) === 0,
-                10.0
+                10.0,
             );
             self::assertSame(0, $exitRecord['context']['exit_code'] ?? null);
 
             $restartRecord = $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker restarting after expected exit.',
-                5.0
+                static fn(array $record): bool => $record['message'] === 'Worker restarting after expected exit.',
+                5.0,
             );
             self::assertSame('Worker restarting after expected exit.', $restartRecord['message']);
 
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker started.',
-                10.0
+                static fn(array $record): bool => $record['message'] === 'Worker started.',
+                10.0,
             );
         } finally {
             $this->stopSessionIfRunning($session);
@@ -80,21 +80,21 @@ final class ProcessCommandTest extends TestCase
             $this->signalPid($pid, SIGKILL);
 
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker exited.'
+                static fn(array $record): bool => $record['message'] === 'Worker exited.'
                     && ($record['context']['exit_code'] ?? 0) !== 0,
-                5.0
+                5.0,
             );
 
             $restartRecord = $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.',
-                10.0
+                static fn(array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.',
+                10.0,
             );
 
             self::assertGreaterThan(0, $restartRecord['context']['delay_seconds'] ?? 0);
 
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker started.',
-                10.0
+                static fn(array $record): bool => $record['message'] === 'Worker started.',
+                10.0,
             );
         } finally {
             $this->stopSessionIfRunning($session);
@@ -115,9 +115,9 @@ final class ProcessCommandTest extends TestCase
                 $this->signalPid($pid, SIGKILL);
 
                 $session->waitForRecord(
-                    static fn (array $record): bool => $record['message'] === 'Worker exited.'
+                    static fn(array $record): bool => $record['message'] === 'Worker exited.'
                         && ($record['context']['exit_code'] ?? 0) !== 0,
-                    5.0
+                    5.0,
                 );
 
                 if ($attempt === 3) {
@@ -125,25 +125,25 @@ final class ProcessCommandTest extends TestCase
                 }
 
                 $session->waitForRecord(
-                    static fn (array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.',
-                    10.0
+                    static fn(array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.',
+                    10.0,
                 );
 
                 $startRecord = $session->waitForRecord(
-                    static fn (array $record): bool => $record['message'] === 'Worker started.',
-                    10.0
+                    static fn(array $record): bool => $record['message'] === 'Worker started.',
+                    10.0,
                 );
                 $pid = $startRecord['context']['pid'] ?? null;
                 self::assertIsInt($pid);
             }
 
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Worker failure limit reached.',
-                10.0
+                static fn(array $record): bool => $record['message'] === 'Worker failure limit reached.',
+                10.0,
             );
             $session->waitForRecord(
-                static fn (array $record): bool => $record['message'] === 'Process manager shutting down.',
-                10.0
+                static fn(array $record): bool => $record['message'] === 'Process manager shutting down.',
+                10.0,
             );
             self::assertSame(0, $session->waitForExit(10.0));
         } finally {
@@ -163,9 +163,9 @@ final class ProcessCommandTest extends TestCase
 
             $logLine = $this->waitForStdoutJsonLine(
                 $session,
-                static fn (array $record): bool => ($record['message'] ?? null) === 'Fixture message handled.'
+                static fn(array $record): bool => ($record['message'] ?? null) === 'Fixture message handled.'
                     && ($record['context']['payload'] ?? null) === $payload,
-                5.0
+                5.0,
             );
 
             self::assertIsArray($logLine['extra'] ?? null);
@@ -186,8 +186,8 @@ final class ProcessCommandTest extends TestCase
 
             $line = $this->waitForStdoutLine(
                 $session,
-                static fn (string $stdoutLine): bool => str_contains($stdoutLine, '[worker 1] fixture plain output'),
-                5.0
+                static fn(string $stdoutLine): bool => str_contains($stdoutLine, '[worker 1] fixture plain output'),
+                5.0,
             );
 
             self::assertSame('[worker 1] fixture plain output', $line);
@@ -202,8 +202,8 @@ final class ProcessCommandTest extends TestCase
     private function waitForWorkerStart(ConsoleProcessSession $session, float $timeout): array
     {
         return $session->waitForRecord(
-            static fn (array $record): bool => $record['message'] === 'Worker started.',
-            $timeout
+            static fn(array $record): bool => $record['message'] === 'Worker started.',
+            $timeout,
         );
     }
 

@@ -8,9 +8,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 final class FixtureMessageDispatcher
 {
-    public function __construct(private readonly MessageBusInterface $messageBus)
-    {
-    }
+    public function __construct(private readonly MessageBusInterface $messageBus) {}
 
     public function dispatch(string $payload, int $count): void
     {

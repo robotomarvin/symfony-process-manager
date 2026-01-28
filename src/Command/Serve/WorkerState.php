@@ -15,9 +15,8 @@ final class WorkerState
         private array $failureTimestamps,
         private float $nextStartAt,
         private bool $stopped,
-        private bool $stopSignalSent
-    ) {
-    }
+        private bool $stopSignalSent,
+    ) {}
 
     public static function create(int $id): self
     {
@@ -27,7 +26,7 @@ final class WorkerState
             [],
             0.0,
             false,
-            false
+            false,
         );
     }
 
@@ -100,7 +99,7 @@ final class WorkerState
         $this->failureTimestamps[] = $now;
         $this->failureTimestamps = array_values(array_filter(
             $this->failureTimestamps,
-            static fn (float $timestamp): bool => $timestamp >= ($now - $failureWindowSeconds)
+            static fn(float $timestamp): bool => $timestamp >= ($now - $failureWindowSeconds),
         ));
     }
 

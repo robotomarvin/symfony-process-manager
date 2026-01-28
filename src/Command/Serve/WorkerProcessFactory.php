@@ -19,7 +19,7 @@ final class WorkerProcessFactory
     public function create(
         ?int $workerTimeLimit,
         ?int $workerMessageLimit,
-        ?string $workerMemoryLimit
+        ?string $workerMemoryLimit,
     ): Process {
         $command = [
             PHP_BINARY,

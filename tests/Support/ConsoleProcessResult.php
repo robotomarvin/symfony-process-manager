@@ -13,7 +13,6 @@ final class ConsoleProcessResult
         public readonly int $exitCode,
         public readonly string $stdout,
         public readonly string $stderr,
-        public readonly array $records
-    ) {
-    }
+        public readonly array $records,
+    ) {}
 }

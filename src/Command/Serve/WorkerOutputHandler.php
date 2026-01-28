@@ -13,9 +13,7 @@ final class WorkerOutputHandler
      */
     private array $buffers = [];
 
-    public function __construct(private readonly WorkerOutputFormatter $formatter)
-    {
-    }
+    public function __construct(private readonly WorkerOutputFormatter $formatter) {}
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
     {
@@ -26,7 +24,7 @@ final class WorkerOutputHandler
             $line = substr($this->buffers[$workerId][$type], 0, $newlinePosition);
             $this->buffers[$workerId][$type] = substr(
                 $this->buffers[$workerId][$type],
-                $newlinePosition + 1
+                $newlinePosition + 1,
             );
             $line = rtrim($line, "\r");
             $this->forwardLine($workerId, $type, $line);

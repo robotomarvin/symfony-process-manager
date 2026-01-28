@@ -18,9 +18,7 @@ final class ConsoleProcessSession
     private string $stdout = '';
     private string $stderr = '';
 
-    public function __construct(private readonly Process $process)
-    {
-    }
+    public function __construct(private readonly Process $process) {}
 
     public function getProcess(): Process
     {
@@ -169,7 +167,7 @@ final class ConsoleProcessSession
         if ($violations !== []) {
             throw new RuntimeException(sprintf(
                 "Detected warning+ log entries:\n%s",
-                implode("\n", $violations)
+                implode("\n", $violations),
             ));
         }
     }

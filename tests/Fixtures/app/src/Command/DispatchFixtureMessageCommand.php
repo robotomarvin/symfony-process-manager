@@ -11,7 +11,7 @@ use SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessageDispatcher;
 
 #[AsCommand(
     name: 'fixture:dispatch',
-    description: 'Dispatch fixture Messenger messages.'
+    description: 'Dispatch fixture Messenger messages.',
 )]
 final class DispatchFixtureMessageCommand extends Command
 {
@@ -27,14 +27,14 @@ final class DispatchFixtureMessageCommand extends Command
             null,
             InputOption::VALUE_REQUIRED,
             'Number of messages to dispatch.',
-            '1'
+            '1',
         );
         $this->addOption(
             'payload',
             null,
             InputOption::VALUE_REQUIRED,
             'Payload to dispatch in the fixture message.',
-            'message'
+            'message',
         );
     }
 

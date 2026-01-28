@@ -50,7 +50,7 @@ final class ConsoleProcessRunner
             throw new RuntimeException(sprintf(
                 'Console process failed with exit code %d. Stderr: %s',
                 $process->getExitCode(),
-                $stderr
+                $stderr,
             ));
         }
 
@@ -58,7 +58,7 @@ final class ConsoleProcessRunner
             $process->getExitCode() ?? 0,
             $stdout,
             $stderr,
-            $records
+            $records,
         );
     }
 
@@ -91,7 +91,7 @@ final class ConsoleProcessRunner
             array_replace($_ENV, [
                 'APP_ENV' => 'test',
                 'APP_DEBUG' => '1',
-            ])
+            ]),
         );
     }
 
@@ -154,7 +154,7 @@ final class ConsoleProcessRunner
         if ($violations !== []) {
             throw new RuntimeException(sprintf(
                 "Detected warning+ log entries:\n%s",
-                implode("\n", $violations)
+                implode("\n", $violations),
             ));
         }
     }

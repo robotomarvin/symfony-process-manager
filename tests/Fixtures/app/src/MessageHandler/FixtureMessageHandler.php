@@ -11,9 +11,7 @@ use SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessage;
 #[AsMessageHandler]
 final class FixtureMessageHandler
 {
-    public function __construct(private readonly LoggerInterface $logger)
-    {
-    }
+    public function __construct(private readonly LoggerInterface $logger) {}
 
     public function __invoke(FixtureMessage $message): void
     {
