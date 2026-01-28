@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace SymfonyProcessManager\Command\Serve;
 
 final class WorkerOutputFormatter

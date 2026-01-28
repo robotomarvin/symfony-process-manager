@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
 
 use PHPUnit\Framework\Attributes\CoversClass;

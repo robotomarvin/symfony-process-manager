@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace SymfonyProcessManager\Tests\Fixtures\App\MessageHandler;
 
 use Psr\Log\LoggerInterface;
