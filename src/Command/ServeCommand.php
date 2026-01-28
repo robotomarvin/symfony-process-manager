@@ -114,46 +114,42 @@ final class ServeCommand extends Command
             $shouldSleep = true;
 
             foreach ($workers as $worker) {
-                if ($worker->process === null) {
-                    if ($shutdownRequested || $worker->stopped) {
-                        continue;
-                    }
-
-                    if ($worker->nextStartAt > $now) {
-                        continue;
-                    }
-
-                    $worker->process = $this->processFactory->create(
+                if (!$shutdownRequested && $worker->shouldStart($now)) {
+                    $worker->setProcess($this->processFactory->create(
                         $workerTimeLimit,
                         $workerMessageLimit,
                         $workerMemoryLimit
-                    );
+                    ));
                     $workerId = $worker->id;
-                    $worker->process->start(function (string $type, string $buffer) use ($workerId): void {
+                    $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {
                         $this->outputHandler->handleOutput($workerId, $type, $buffer);
                     });
-                    $worker->stopSignalSent = false;
+                    $worker->markStarted();
                     $this->logger->info('Worker started.', [
                         'worker' => $worker->id,
-                        'pid' => $worker->process->getPid(),
+                        'pid' => $worker->getProcess()->getPid(),
                     ]);
                     $shouldSleep = false;
                     continue;
                 }
 
-                if ($worker->process->isRunning()) {
-                    if ($shutdownRequested && !$worker->stopSignalSent) {
-                        $worker->stopSignalSent = true;
-                        $worker->process->signal(SIGTERM);
+                if (!$worker->hasProcess()) {
+                    continue;
+                }
+
+                if ($worker->isRunning()) {
+                    if ($shutdownRequested && !$worker->isStopSignalSent()) {
+                        $worker->markStopSignalSent();
+                        $worker->getProcess()->signal(SIGTERM);
                         $this->logger->info('Sent SIGTERM to worker.', ['worker' => $worker->id]);
                     }
                     continue;
                 }
 
-                $exitCode = $worker->process->getExitCode();
-                $pid = $worker->process->getPid();
+                $exitCode = $worker->getProcess()->getExitCode();
+                $pid = $worker->getProcess()->getPid();
                 $this->outputHandler->flush($worker->id);
-                $worker->process = null;
+                $worker->clearProcess();
 
                 $exitCode = $exitCode ?? 1;
                 $this->logger->info('Worker exited.', [
@@ -163,31 +159,26 @@ final class ServeCommand extends Command
                 ]);
 
                 if ($shutdownRequested) {
-                    $worker->stopped = true;
+                    $worker->markStopped();
                     continue;
                 }
 
                 if ($exitCode === 0) {
-                    $worker->failureTimestamps = [];
-                    $worker->nextStartAt = $now;
+                    $worker->clearFailures();
+                    $worker->scheduleImmediateRestart($now);
                     $this->logger->info('Worker restarting after expected exit.', ['worker' => $worker->id]);
                     $shouldSleep = false;
                     continue;
                 }
 
-                $worker->failureTimestamps[] = $now;
-                $worker->failureTimestamps = array_values(array_filter(
-                    $worker->failureTimestamps,
-                    static fn (float $timestamp): bool => $timestamp >= ($now - self::FAILURE_WINDOW_SECONDS)
-                ));
-
-                $failureCount = count($worker->failureTimestamps);
+                $worker->recordFailure($now, self::FAILURE_WINDOW_SECONDS);
+                $failureCount = $worker->getFailureCount();
 
                 if ($failureCount > self::FAILURE_LIMIT) {
                     $this->logger->info('Worker failure limit reached.', ['worker' => $worker->id]);
                     $shutdownRequested = true;
                     $shutdownReason = 'failure_limit';
-                    $worker->stopped = true;
+                    $worker->markStopped();
                     continue;
                 }
 
@@ -196,7 +187,7 @@ final class ServeCommand extends Command
                     self::BACKOFF_MAX_SECONDS
                 );
 
-                $worker->nextStartAt = $now + $delaySeconds;
+                $worker->scheduleRestart($now, $delaySeconds);
                 $this->logger->info('Worker restarting after unexpected exit.', [
                     'worker' => $worker->id,
                     'delay_seconds' => $delaySeconds,
@@ -208,7 +199,7 @@ final class ServeCommand extends Command
                 $allStopped = true;
 
                 foreach ($workers as $worker) {
-                    if ($worker->process !== null) {
+                    if ($worker->hasProcess()) {
                         $allStopped = false;
                     }
                 }
