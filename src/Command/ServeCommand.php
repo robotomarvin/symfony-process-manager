@@ -174,7 +174,7 @@ final class ServeCommand extends Command
                 $failureCount = $worker->getFailureCount();
 
                 if ($failureCount > self::FAILURE_LIMIT) {
-                    $this->logger->info('Worker failure limit reached.', ['worker' => $worker->id]);
+                    $this->logger->error('Worker failure limit reached.', ['worker' => $worker->id]);
                     $shutdownRequested = true;
                     $shutdownReason = 'failure_limit';
                     $worker->markStopped();
@@ -187,7 +187,7 @@ final class ServeCommand extends Command
                 );
 
                 $worker->scheduleRestart($now, $delaySeconds);
-                $this->logger->info('Worker restarting after unexpected exit.', [
+                $this->logger->warning('Worker restarting after unexpected exit.', [
                     'worker' => $worker->id,
                     'delay_seconds' => $delaySeconds,
                     'attempt' => $failureCount,

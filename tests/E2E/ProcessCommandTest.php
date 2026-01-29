@@ -70,7 +70,7 @@ final class ProcessCommandTest extends TestCase
     public function testUnexpectedExitRestartsWithBackoff(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve', ['--workers=1'], assertNoWarnings: false);
 
         try {
             $startRecord = $this->waitForWorkerStart($session, 5.0);
@@ -91,6 +91,7 @@ final class ProcessCommandTest extends TestCase
             );
 
             self::assertGreaterThan(0, $restartRecord['context']['delay_seconds'] ?? 0);
+            self::assertSame('warning', $restartRecord['level']);
 
             $session->waitForRecord(
                 static fn(array $record): bool => $record['message'] === 'Worker started.',
@@ -104,7 +105,7 @@ final class ProcessCommandTest extends TestCase
     public function testUnexpectedExitStopsAfterFailureLimit(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve', ['--workers=1'], assertNoWarnings: false);
 
         try {
             $startRecord = $this->waitForWorkerStart($session, 5.0);
@@ -124,10 +125,11 @@ final class ProcessCommandTest extends TestCase
                     break;
                 }
 
-                $session->waitForRecord(
+                $restartRecord = $session->waitForRecord(
                     static fn(array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.',
                     10.0,
                 );
+                self::assertSame('warning', $restartRecord['level']);
 
                 $startRecord = $session->waitForRecord(
                     static fn(array $record): bool => $record['message'] === 'Worker started.',
@@ -137,10 +139,11 @@ final class ProcessCommandTest extends TestCase
                 self::assertIsInt($pid);
             }
 
-            $session->waitForRecord(
+            $failureLimitRecord = $session->waitForRecord(
                 static fn(array $record): bool => $record['message'] === 'Worker failure limit reached.',
                 10.0,
             );
+            self::assertSame('error', $failureLimitRecord['level']);
             $session->waitForRecord(
                 static fn(array $record): bool => $record['message'] === 'Process manager shutting down.',
                 10.0,

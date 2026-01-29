@@ -18,7 +18,10 @@ final class ConsoleProcessSession
     private string $stdout = '';
     private string $stderr = '';
 
-    public function __construct(private readonly Process $process) {}
+    public function __construct(
+        private readonly Process $process,
+        private readonly bool $assertNoWarnings = true,
+    ) {}
 
     public function getProcess(): Process
     {
@@ -87,7 +90,9 @@ final class ConsoleProcessSession
                 'context' => isset($decoded['context']) && is_array($decoded['context']) ? $decoded['context'] : [],
             ];
 
-            $this->assertNoWarnings([$record]);
+            if ($this->assertNoWarnings) {
+                $this->assertNoWarnings([$record]);
+            }
             $this->records[] = $record;
             $newRecords[] = $record;
         }

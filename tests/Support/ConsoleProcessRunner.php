@@ -33,7 +33,7 @@ final class ConsoleProcessRunner
     /**
      * @param array<int, string> $arguments
      */
-    public function run(string $command, array $arguments = []): ConsoleProcessResult
+    public function run(string $command, array $arguments = [], bool $assertNoWarnings = true): ConsoleProcessResult
     {
         $process = $this->createProcess($command, $arguments);
 
@@ -44,7 +44,9 @@ final class ConsoleProcessRunner
         $stderr = $process->getErrorOutput();
         $records = $this->parseJsonLogs($stdout);
 
-        $this->assertNoWarnings($records);
+        if ($assertNoWarnings) {
+            $this->assertNoWarnings($records);
+        }
 
         if (!$process->isSuccessful()) {
             throw new RuntimeException(sprintf(
@@ -65,13 +67,13 @@ final class ConsoleProcessRunner
     /**
      * @param array<int, string> $arguments
      */
-    public function start(string $command, array $arguments = []): ConsoleProcessSession
+    public function start(string $command, array $arguments = [], bool $assertNoWarnings = true): ConsoleProcessSession
     {
         $process = $this->createProcess($command, $arguments);
         $process->setTimeout(self::DEFAULT_TIMEOUT);
         $process->start();
 
-        return new ConsoleProcessSession($process);
+        return new ConsoleProcessSession($process, $assertNoWarnings);
     }
 
     /**
