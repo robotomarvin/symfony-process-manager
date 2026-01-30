@@ -1,4 +1,4 @@
 symfony_process_manager:
     transports:
         async:
-            processes: 2
+            processes: 1

@@ -14,6 +14,7 @@ use SymfonyProcessManager\Command\Serve\ConsumeArgs;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
+use SymfonyProcessManager\Command\Serve\TransportConfig;
 use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
 
 #[CoversClass(ProcessManagerLoop::class)]
@@ -53,9 +54,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $exitCode = $loop->run();
@@ -82,9 +81,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $exitCode = $loop->run();
@@ -113,9 +110,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $exitCode = $loop->run();
@@ -138,9 +133,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();
@@ -165,9 +158,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 3,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async', processes: 3)],
         );
 
         $exitCode = $loop->run();
@@ -195,9 +186,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();
@@ -220,9 +209,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();
@@ -253,9 +240,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: $consumeArgs,
+            transportConfigs: [TransportConfig::create(transport: 'async', consumeArgs: $consumeArgs)],
         );
 
         $loop->run();
@@ -280,9 +265,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $exitCode = $loop->run();
@@ -304,9 +287,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();
@@ -328,9 +309,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();
@@ -356,9 +335,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            workerCount: 1,
-            transport: 'async',
-            consumeArgs: ConsumeArgs::create(),
+            transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
         $loop->run();

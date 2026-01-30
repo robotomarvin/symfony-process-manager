@@ -9,7 +9,6 @@ use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use SymfonyProcessManager\Command\Serve\ConsumeArgs;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
@@ -23,8 +22,6 @@ use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
 )]
 final class ServeCommand extends Command
 {
-    private const DEFAULT_WORKER_COUNT = 2;
-
     /** @var list<TransportConfig> */
     private readonly array $resolvedTransportConfigs;
 
@@ -105,53 +102,18 @@ final class ServeCommand extends Command
         return $configs;
     }
 
-    protected function configure(): void
-    {
-        $this->addOption(
-            'workers',
-            null,
-            InputOption::VALUE_REQUIRED,
-            'Number of worker processes to spawn.',
-            (string) self::DEFAULT_WORKER_COUNT,
-        );
-    }
-
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        unset($output);
-
-        $workerCount = $this->parsePositiveInt($input, 'workers') ?? self::DEFAULT_WORKER_COUNT;
-        $transportConfig = $this->resolvedTransportConfigs[0];
+        unset($input, $output);
 
         $loop = new ProcessManagerLoop(
             $this->clock,
             $this->logger,
             $this->processFactory,
             $this->outputHandler,
-            $workerCount,
-            $transportConfig->transport,
-            $transportConfig->consumeArgs,
+            $this->resolvedTransportConfigs,
         );
 
         return $loop->run();
-    }
-
-    private function parsePositiveInt(InputInterface $input, string $option): ?int
-    {
-        $value = $input->getOption($option);
-
-        if ($value === null) {
-            return null;
-        }
-
-        if (!\is_string($value) || !ctype_digit($value) || (int) $value < 1) {
-            throw new \InvalidArgumentException(sprintf(
-                'The --%s option must be a positive integer, got: %s',
-                $option,
-                \is_string($value) ? $value : get_debug_type($value),
-            ));
-        }
-
-        return (int) $value;
     }
 }

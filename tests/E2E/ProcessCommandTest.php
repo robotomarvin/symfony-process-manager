@@ -34,7 +34,7 @@ final class ProcessCommandTest extends TestCase
     public function testProcessCommandStartsAndStopsOnSigterm(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve');
 
         try {
             $this->waitForWorkerStart($session, 5.0);
@@ -52,7 +52,7 @@ final class ProcessCommandTest extends TestCase
     public function testExpectedExitRestartsImmediately(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve');
 
         try {
             $this->waitForWorkerStart($session, 5.0);
@@ -83,7 +83,7 @@ final class ProcessCommandTest extends TestCase
     public function testUnexpectedExitRestartsWithBackoff(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1'], assertNoWarnings: false);
+        $session = $runner->start('pm:serve', assertNoWarnings: false);
 
         try {
             $startRecord = $this->waitForWorkerStart($session, 5.0);
@@ -118,7 +118,7 @@ final class ProcessCommandTest extends TestCase
     public function testUnexpectedExitStopsAfterFailureLimit(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1'], assertNoWarnings: false);
+        $session = $runner->start('pm:serve', assertNoWarnings: false);
 
         try {
             $startRecord = $this->waitForWorkerStart($session, 5.0);
@@ -170,7 +170,7 @@ final class ProcessCommandTest extends TestCase
     public function testWorkerJsonLogsIncludeWorkerId(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve');
 
         try {
             $this->waitForWorkerStart($session, 5.0);
@@ -194,7 +194,7 @@ final class ProcessCommandTest extends TestCase
     public function testWorkerOutputPrefixesNonJsonLines(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1']);
+        $session = $runner->start('pm:serve');
 
         try {
             $this->waitForWorkerStart($session, 5.0);

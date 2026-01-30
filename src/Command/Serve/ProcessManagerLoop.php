@@ -10,28 +10,29 @@ use Symfony\Component\Console\Command\Command;
 
 final class ProcessManagerLoop
 {
-    private const FAILURE_LIMIT = 3;
-    private const FAILURE_WINDOW_SECONDS = 60;
-    private const BACKOFF_BASE_SECONDS = 1;
-    private const BACKOFF_MAX_SECONDS = 30;
-    private const POLL_INTERVAL_MICROSECONDS = 200000;
-
+    /**
+     * @param list<TransportConfig> $transportConfigs
+     */
     public function __construct(
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
-        private readonly int $workerCount,
-        private readonly string $transport,
-        private readonly ConsumeArgs $consumeArgs,
+        private readonly array $transportConfigs,
     ) {}
 
     public function run(): int
     {
         $shutdownState = new ShutdownState();
+        $workers = $this->initializeWorkers();
+        $totalWorkerCount = count($workers);
 
         $this->logger->info('Process manager server started.', [
-            'workers' => $this->workerCount,
+            'workers' => $totalWorkerCount,
+            'transports' => array_map(
+                static fn(TransportConfig $config): string => $config->transport,
+                $this->transportConfigs,
+            ),
         ]);
 
         if (extension_loaded('pcntl') && function_exists('pcntl_signal') && function_exists('pcntl_async_signals')) {
@@ -41,15 +42,15 @@ final class ProcessManagerLoop
             });
         }
 
-        $workers = $this->initializeWorkers();
+        $minPollIntervalUs = $this->getMinPollIntervalMicroseconds();
 
         while (true) {
             $now = (float) $this->clock->now()->format('U.u');
             $shouldSleep = true;
 
-            foreach ($workers as $worker) {
+            foreach ($workers as [$worker, $config]) {
                 if (!$shutdownState->isRequested() && $worker->shouldStart($now)) {
-                    $this->startWorker($worker);
+                    $this->startWorker($worker, $config);
                     $shouldSleep = false;
                     continue;
                 }
@@ -63,7 +64,7 @@ final class ProcessManagerLoop
                     continue;
                 }
 
-                $skipSleep = $this->handleWorkerExit($worker, $shutdownState, $now);
+                $skipSleep = $this->handleWorkerExit($worker, $config, $shutdownState, $now);
                 if ($skipSleep) {
                     $shouldSleep = false;
                 }
@@ -77,30 +78,34 @@ final class ProcessManagerLoop
             }
 
             if ($shouldSleep) {
-                usleep(self::POLL_INTERVAL_MICROSECONDS);
+                usleep($minPollIntervalUs);
             }
         }
     }
 
     /**
-     * @return list<WorkerState>
+     * @return list<array{WorkerState, TransportConfig}>
      */
     private function initializeWorkers(): array
     {
         $workers = [];
+        $workerId = 1;
 
-        for ($index = 1; $index <= $this->workerCount; $index += 1) {
-            $workers[] = WorkerState::create($index);
+        foreach ($this->transportConfigs as $config) {
+            for ($i = 0; $i < $config->processes; $i++) {
+                $workers[] = [WorkerState::create($workerId), $config];
+                $workerId++;
+            }
         }
 
         return $workers;
     }
 
-    private function startWorker(WorkerState $worker): void
+    private function startWorker(WorkerState $worker, TransportConfig $config): void
     {
         $worker->setProcess($this->processFactory->create(
-            $this->transport,
-            $this->consumeArgs,
+            $config->transport,
+            $config->consumeArgs,
         ));
         $workerId = $worker->id;
         $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {
@@ -109,6 +114,7 @@ final class ProcessManagerLoop
         $worker->markStarted();
         $this->logger->info('Worker started.', [
             'worker' => $worker->id,
+            'transport' => $config->transport,
             'pid' => $worker->getProcess()->getPid(),
         ]);
     }
@@ -124,6 +130,7 @@ final class ProcessManagerLoop
 
     private function handleWorkerExit(
         WorkerState $worker,
+        TransportConfig $config,
         ShutdownState $shutdownState,
         float $now,
     ): bool {
@@ -135,6 +142,7 @@ final class ProcessManagerLoop
         $exitCode = $exitCode ?? 1;
         $this->logger->info('Worker exited.', [
             'worker' => $worker->id,
+            'transport' => $config->transport,
             'pid' => $pid,
             'exit_code' => $exitCode,
         ]);
@@ -151,19 +159,22 @@ final class ProcessManagerLoop
             return true;
         }
 
-        $worker->recordFailure($now, self::FAILURE_WINDOW_SECONDS);
+        $worker->recordFailure($now, $config->failureWindowSeconds);
         $failureCount = $worker->getFailureCount();
 
-        if ($failureCount > self::FAILURE_LIMIT) {
-            $this->logger->error('Worker failure limit reached.', ['worker' => $worker->id]);
+        if ($failureCount > $config->failureLimit) {
+            $this->logger->error('Worker failure limit reached.', [
+                'worker' => $worker->id,
+                'transport' => $config->transport,
+            ]);
             $shutdownState->request(ShutdownReason::FAILURE_LIMIT);
             $worker->markStopped();
             return false;
         }
 
         $delaySeconds = min(
-            self::BACKOFF_BASE_SECONDS * (2 ** ($failureCount - 1)),
-            self::BACKOFF_MAX_SECONDS,
+            $config->backoffBaseSeconds * (2 ** ($failureCount - 1)),
+            $config->backoffMaxSeconds,
         );
 
         $worker->scheduleRestart($now, $delaySeconds);
@@ -177,16 +188,27 @@ final class ProcessManagerLoop
     }
 
     /**
-     * @param list<WorkerState> $workers
+     * @param list<array{WorkerState, TransportConfig}> $workers
      */
     private function allWorkersStopped(array $workers): bool
     {
-        foreach ($workers as $worker) {
+        foreach ($workers as [$worker]) {
             if ($worker->hasProcess()) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private function getMinPollIntervalMicroseconds(): int
+    {
+        $minMs = PHP_INT_MAX;
+
+        foreach ($this->transportConfigs as $config) {
+            $minMs = min($minMs, $config->pollIntervalMs);
+        }
+
+        return $minMs * 1000;
     }
 }

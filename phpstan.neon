@@ -25,7 +25,3 @@ parameters:
         -
             message: '#Call to method arrayNode\(\) on an unknown class#'
             path: src/DependencyInjection/Configuration.php
-        -
-            identifier: property.onlyWritten
-            path: src/Command/ServeCommand.php
-            reportUnmatched: false
