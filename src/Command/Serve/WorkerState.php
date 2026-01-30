@@ -8,24 +8,20 @@ use Symfony\Component\Process\Process;
 
 final class WorkerState
 {
-    public readonly int $id;
-
     public function __construct(
-        private readonly WorkerConfig $config,
+        public readonly int $id,
         private ?Process $process,
         /** @var array<int, float> */
         private array $failureTimestamps,
         private float $nextStartAt,
         private bool $stopped,
         private bool $stopSignalSent,
-    ) {
-        $this->id = $this->config->id;
-    }
+    ) {}
 
     public static function create(int $id): self
     {
         return new self(
-            new WorkerConfig($id),
+            $id,
             null,
             [],
             0.0,
