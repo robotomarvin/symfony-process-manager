@@ -118,7 +118,23 @@ final class ConsoleProcessSession
             usleep(100000);
         }
 
-        throw new RuntimeException('Timed out waiting for log record.');
+        $elapsed = microtime(true) - $start;
+        $lastRecords = array_slice($this->records, -5);
+        $recordsSummary = array_map(
+            static fn(array $r): string => sprintf('[%s] %s', $r['level'], $r['message']),
+            $lastRecords,
+        );
+        $stderr = $this->stderr !== '' ? substr($this->stderr, -500) : '(empty)';
+        $exitCode = $this->process->isRunning() ? 'still running' : (string) ($this->process->getExitCode() ?? 'unknown');
+
+        throw new RuntimeException(sprintf(
+            "Timed out after %.1fs waiting for log record.\nTotal records: %d\nLast records:\n  %s\nProcess: %s\nStderr (last 500 chars): %s",
+            $elapsed,
+            count($this->records),
+            $recordsSummary !== [] ? implode("\n  ", $recordsSummary) : '(none)',
+            $exitCode === 'still running' ? 'still running' : sprintf('exited with code %s', $exitCode),
+            $stderr,
+        ));
     }
 
     public function waitForExit(float $timeoutSeconds): int
@@ -135,7 +151,16 @@ final class ConsoleProcessSession
             usleep(100000);
         }
 
-        throw new RuntimeException('Timed out waiting for process to exit.');
+        $elapsed = microtime(true) - $start;
+        $stderr = $this->stderr !== '' ? substr($this->stderr, -500) : '(empty)';
+
+        throw new RuntimeException(sprintf(
+            "Timed out after %.1fs waiting for process to exit.\nTotal records: %d\nProcess: %s\nStderr (last 500 chars): %s",
+            $elapsed,
+            count($this->records),
+            $this->process->isRunning() ? 'still running' : sprintf('exited with code %s', $this->process->getExitCode() ?? 'unknown'),
+            $stderr,
+        ));
     }
 
     public function signal(int $signal): void

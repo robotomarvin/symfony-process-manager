@@ -241,6 +241,8 @@ final class ProcessCommandTest extends TestCase
         $start = microtime(true);
         $offset = 0;
         $buffer = '';
+        $linesProcessed = 0;
+        $recentLines = [];
 
         while ((microtime(true) - $start) < $timeout) {
             $session->collectRecords();
@@ -261,6 +263,12 @@ final class ProcessCommandTest extends TestCase
                     continue;
                 }
 
+                $linesProcessed++;
+                $recentLines[] = $line;
+                if (count($recentLines) > 5) {
+                    array_shift($recentLines);
+                }
+
                 $result = $lineProcessor($line);
 
                 if ($result !== null) {
@@ -271,7 +279,17 @@ final class ProcessCommandTest extends TestCase
             usleep(100000);
         }
 
-        throw new \RuntimeException('Timed out waiting for stdout line.');
+        $elapsed = microtime(true) - $start;
+        $stderr = $session->getStderr();
+        $stderr = $stderr !== '' ? substr($stderr, -500) : '(empty)';
+
+        throw new \RuntimeException(sprintf(
+            "Timed out after %.1fs waiting for stdout line.\nLines processed: %d\nLast lines:\n  %s\nStderr (last 500 chars): %s",
+            $elapsed,
+            $linesProcessed,
+            $recentLines !== [] ? implode("\n  ", $recentLines) : '(none)',
+            $stderr,
+        ));
     }
 
     /**
