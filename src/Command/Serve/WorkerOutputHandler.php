@@ -13,17 +13,26 @@ final class WorkerOutputHandler
      */
     private array $buffers = [];
 
+    /** @var resource */
+    private mixed $stdoutStream;
+
+    /** @var resource */
+    private mixed $stderrStream;
+
     /**
      * @param resource|null $stdoutStream
      * @param resource|null $stderrStream
      */
     public function __construct(
         private readonly WorkerOutputFormatter $formatter,
-        private mixed $stdoutStream = null,
-        private mixed $stderrStream = null,
+        mixed $stdoutStream = null,
+        mixed $stderrStream = null,
     ) {
-        $this->stdoutStream ??= \STDOUT;
-        $this->stderrStream ??= \STDERR;
+        $this->stdoutStream = $stdoutStream ?? \STDOUT;
+        $this->stderrStream = $stderrStream ?? \STDERR;
+
+        assert(\is_resource($this->stdoutStream), 'stdoutStream must be a resource');
+        assert(\is_resource($this->stderrStream), 'stderrStream must be a resource');
     }
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
@@ -78,7 +87,6 @@ final class WorkerOutputHandler
     private function forwardLine(int $workerId, string $type, string $line): void
     {
         $payload = $this->formatter->format($workerId, $line);
-        /** @var resource $stream */
         $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);
         fflush($stream);
