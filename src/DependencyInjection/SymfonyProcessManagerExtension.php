@@ -8,6 +8,7 @@ use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
+use SymfonyProcessManager\Command\ServeCommand;
 
 final class SymfonyProcessManagerExtension extends Extension
 {
@@ -15,5 +16,10 @@ final class SymfonyProcessManagerExtension extends Extension
     {
         $loader = new YamlFileLoader($container, new FileLocator(__DIR__ . '/../Resources/config'));
         $loader->load('services.yaml');
+
+        $config = $this->processConfiguration(new Configuration(), $configs);
+
+        $container->getDefinition(ServeCommand::class)
+            ->setArgument('$transportConfigs', $config['transports']);
     }
 }

@@ -919,18 +919,38 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         enabled?: bool|Param, // Default: false
  *     },
  * }
+ * @psalm-type SymfonyProcessManagerConfig = array{
+ *     transports: array<string, array{ // Default: []
+ *         processes?: int|Param, // Default: 1
+ *         failure_limit?: int|Param, // Default: 3
+ *         failure_window?: int|Param, // Default: 60
+ *         backoff_base?: int|Param, // Default: 1
+ *         backoff_max?: int|Param, // Default: 30
+ *         poll_interval_ms?: int|Param, // Default: 200
+ *         consume_args?: array{
+ *             memory_limit?: int|Param, // Default: null
+ *             time_limit?: int|Param, // Default: null
+ *             limit?: int|Param, // Default: null
+ *             sleep?: int|Param, // Default: null
+ *             queues?: list<scalar|null|Param>,
+ *             extra?: list<scalar|null|Param>,
+ *         },
+ *     }>,
+ * }
  * @psalm-type ConfigType = array{
  *     imports?: ImportsConfig,
  *     parameters?: ParametersConfig,
  *     services?: ServicesConfig,
  *     doctrine?: DoctrineConfig,
  *     framework?: FrameworkConfig,
+ *     symfony_process_manager?: SymfonyProcessManagerConfig,
  *     "when@test"?: array{
  *         imports?: ImportsConfig,
  *         parameters?: ParametersConfig,
  *         services?: ServicesConfig,
  *         doctrine?: DoctrineConfig,
  *         framework?: FrameworkConfig,
+ *         symfony_process_manager?: SymfonyProcessManagerConfig,
  *     },
  *     ...<string, ExtensionType|array{ // extra keys must follow the when@%env% pattern or match an extension alias
  *         imports?: ImportsConfig,
