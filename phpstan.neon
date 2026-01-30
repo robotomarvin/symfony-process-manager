@@ -18,3 +18,7 @@ parameters:
         - tests/Fixtures/app/var/cache/test/Symfony/Config
     scanFiles:
         - vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php
+    ignoreErrors:
+        -
+            identifier: attribute.nonRepeatable
+            path: tests/E2E/ProcessCommandTest.php
