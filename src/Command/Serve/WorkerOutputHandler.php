@@ -13,7 +13,18 @@ final class WorkerOutputHandler
      */
     private array $buffers = [];
 
-    public function __construct(private readonly WorkerOutputFormatter $formatter) {}
+    /**
+     * @param resource|null $stdoutStream
+     * @param resource|null $stderrStream
+     */
+    public function __construct(
+        private readonly WorkerOutputFormatter $formatter,
+        private mixed $stdoutStream = null,
+        private mixed $stderrStream = null,
+    ) {
+        $this->stdoutStream ??= \STDOUT;
+        $this->stderrStream ??= \STDERR;
+    }
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
     {
@@ -67,7 +78,8 @@ final class WorkerOutputHandler
     private function forwardLine(int $workerId, string $type, string $line): void
     {
         $payload = $this->formatter->format($workerId, $line);
-        $stream = $type === Process::ERR ? STDERR : STDOUT;
+        /** @var resource $stream */
+        $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);
         fflush($stream);
     }
