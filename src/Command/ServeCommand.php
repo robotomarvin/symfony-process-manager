@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\Command;
 
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -23,6 +24,7 @@ final class ServeCommand extends Command
     private const DEFAULT_WORKER_COUNT = 2;
 
     public function __construct(
+        private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactory $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
@@ -84,6 +86,7 @@ final class ServeCommand extends Command
             : null;
 
         $loop = new ProcessManagerLoop(
+            $this->clock,
             $this->logger,
             $this->processFactory,
             $this->outputHandler,

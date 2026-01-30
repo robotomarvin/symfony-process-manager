@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\Command\Serve;
 
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 
 final class ProcessManagerLoop
@@ -16,6 +17,7 @@ final class ProcessManagerLoop
     private const POLL_INTERVAL_MICROSECONDS = 200000;
 
     public function __construct(
+        private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactory $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
@@ -45,7 +47,7 @@ final class ProcessManagerLoop
         $workers = $this->initializeWorkers();
 
         while (true) {
-            $now = microtime(true);
+            $now = (float) $this->clock->now()->format('U.u');
             $shouldSleep = true;
 
             foreach ($workers as $worker) {
