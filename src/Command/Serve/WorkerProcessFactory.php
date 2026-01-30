@@ -7,7 +7,7 @@ namespace SymfonyProcessManager\Command\Serve;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Process\Process;
 
-final class WorkerProcessFactory
+final class WorkerProcessFactory implements WorkerProcessFactoryInterface
 {
     private readonly string $projectDir;
 

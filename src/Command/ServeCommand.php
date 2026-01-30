@@ -13,7 +13,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
-use SymfonyProcessManager\Command\Serve\WorkerProcessFactory;
+use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
 
 #[AsCommand(
     name: 'pm:serve',
@@ -26,7 +26,7 @@ final class ServeCommand extends Command
     public function __construct(
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
-        private readonly WorkerProcessFactory $processFactory,
+        private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
     ) {
         parent::__construct();

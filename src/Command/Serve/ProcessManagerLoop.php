@@ -19,7 +19,7 @@ final class ProcessManagerLoop
     public function __construct(
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
-        private readonly WorkerProcessFactory $processFactory,
+        private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
         private readonly int $workerCount,
         private readonly ?int $workerTimeLimit,
