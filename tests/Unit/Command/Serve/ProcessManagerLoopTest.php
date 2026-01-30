@@ -10,6 +10,7 @@ use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Command\Serve\ConsumeArgs;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
@@ -53,9 +54,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $exitCode = $loop->run();
@@ -83,9 +83,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $exitCode = $loop->run();
@@ -115,9 +114,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $exitCode = $loop->run();
@@ -141,9 +139,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -169,9 +166,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 3,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $exitCode = $loop->run();
@@ -200,9 +196,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -226,9 +221,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -240,7 +234,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertArrayHasKey('worker', $exitRecord['context']);
     }
 
-    public function testFactoryReceivesConfiguredLimits(): void
+    public function testFactoryReceivesConfiguredTransportAndConsumeArgs(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -248,24 +242,28 @@ final class ProcessManagerLoopTest extends TestCase
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
 
+        $consumeArgs = ConsumeArgs::create(
+            memoryLimit: 128,
+            timeLimit: 300,
+            limit: 50,
+        );
+
         $loop = new ProcessManagerLoop(
             $this->clock,
             $this->logger,
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: 300,
-            workerMessageLimit: 50,
-            workerMemoryLimit: '128M',
+            transport: 'async',
+            consumeArgs: $consumeArgs,
         );
 
         $loop->run();
 
         $calls = $factory->getCreateCalls();
         self::assertNotEmpty($calls);
-        self::assertSame(300, $calls[0]['timeLimit']);
-        self::assertSame(50, $calls[0]['messageLimit']);
-        self::assertSame('128M', $calls[0]['memoryLimit']);
+        self::assertSame('async', $calls[0]['transport']);
+        self::assertSame($consumeArgs, $calls[0]['consumeArgs']);
     }
 
     public function testNullExitCodeTreatedAsFailure(): void
@@ -283,9 +281,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $exitCode = $loop->run();
@@ -308,9 +305,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -333,9 +329,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -362,9 +357,8 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             workerCount: 1,
-            workerTimeLimit: null,
-            workerMessageLimit: null,
-            workerMemoryLimit: null,
+            transport: 'async',
+            consumeArgs: ConsumeArgs::create(),
         );
 
         $loop->run();
@@ -438,7 +432,7 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
     private int $index = 0;
     private int $createCount = 0;
 
-    /** @var list<array{timeLimit: ?int, messageLimit: ?int, memoryLimit: ?string}> */
+    /** @var list<array{transport: string, consumeArgs: ConsumeArgs}> */
     private array $createCalls = [];
 
     public function addProcess(Process $process): void
@@ -446,15 +440,11 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
         $this->processes[] = $process;
     }
 
-    public function create(
-        ?int $workerTimeLimit,
-        ?int $workerMessageLimit,
-        ?string $workerMemoryLimit,
-    ): Process {
+    public function create(string $transport, ConsumeArgs $consumeArgs): Process
+    {
         $this->createCalls[] = [
-            'timeLimit' => $workerTimeLimit,
-            'messageLimit' => $workerMessageLimit,
-            'memoryLimit' => $workerMemoryLimit,
+            'transport' => $transport,
+            'consumeArgs' => $consumeArgs,
         ];
 
         if ($this->index >= count($this->processes)) {
@@ -478,7 +468,7 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
     }
 
     /**
-     * @return list<array{timeLimit: ?int, messageLimit: ?int, memoryLimit: ?string}>
+     * @return list<array{transport: string, consumeArgs: ConsumeArgs}>
      */
     public function getCreateCalls(): array
     {

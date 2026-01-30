@@ -16,28 +16,15 @@ final class WorkerProcessFactory implements WorkerProcessFactoryInterface
         $this->projectDir = $kernel->getProjectDir();
     }
 
-    public function create(
-        ?int $workerTimeLimit,
-        ?int $workerMessageLimit,
-        ?string $workerMemoryLimit,
-    ): Process {
+    public function create(string $transport, ConsumeArgs $consumeArgs): Process
+    {
         $command = [
             PHP_BINARY,
             $this->projectDir . '/bin/console',
             'messenger:consume',
+            $transport,
+            ...$consumeArgs->toCliArguments(),
         ];
-
-        if ($workerTimeLimit !== null) {
-            $command[] = sprintf('--time-limit=%d', $workerTimeLimit);
-        }
-
-        if ($workerMessageLimit !== null) {
-            $command[] = sprintf('--limit=%d', $workerMessageLimit);
-        }
-
-        if ($workerMemoryLimit !== null) {
-            $command[] = sprintf('--memory-limit=%s', $workerMemoryLimit);
-        }
 
         $process = new Process($command, $this->projectDir);
 

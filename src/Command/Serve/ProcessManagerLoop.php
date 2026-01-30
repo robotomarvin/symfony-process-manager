@@ -22,9 +22,8 @@ final class ProcessManagerLoop
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
         private readonly int $workerCount,
-        private readonly ?int $workerTimeLimit,
-        private readonly ?int $workerMessageLimit,
-        private readonly ?string $workerMemoryLimit,
+        private readonly string $transport,
+        private readonly ConsumeArgs $consumeArgs,
     ) {}
 
     public function run(): int
@@ -100,9 +99,8 @@ final class ProcessManagerLoop
     private function startWorker(WorkerState $worker): void
     {
         $worker->setProcess($this->processFactory->create(
-            $this->workerTimeLimit,
-            $this->workerMessageLimit,
-            $this->workerMemoryLimit,
+            $this->transport,
+            $this->consumeArgs,
         ));
         $workerId = $worker->id;
         $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {

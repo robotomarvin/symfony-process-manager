@@ -52,11 +52,11 @@ final class ProcessCommandTest extends TestCase
     public function testExpectedExitRestartsImmediately(): void
     {
         $runner = new ConsoleProcessRunner();
-        $session = $runner->start('pm:serve', ['--workers=1', '--worker-message-limit=1']);
+        $session = $runner->start('pm:serve', ['--workers=1']);
 
         try {
             $this->waitForWorkerStart($session, 5.0);
-            $this->dispatchFixtureMessages(1, 'message');
+            $this->dispatchFixtureMessages(1, 'exit:0');
 
             $exitRecord = $session->waitForRecord(
                 static fn(array $record): bool => $record['message'] === 'Worker exited.'

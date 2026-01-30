@@ -8,9 +8,5 @@ use Symfony\Component\Process\Process;
 
 interface WorkerProcessFactoryInterface
 {
-    public function create(
-        ?int $workerTimeLimit,
-        ?int $workerMessageLimit,
-        ?string $workerMemoryLimit,
-    ): Process;
+    public function create(string $transport, ConsumeArgs $consumeArgs): Process;
 }
