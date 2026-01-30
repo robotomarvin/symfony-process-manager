@@ -38,7 +38,7 @@ final class ProcessManagerLoop
         if (extension_loaded('pcntl') && function_exists('pcntl_signal') && function_exists('pcntl_async_signals')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, static function () use ($shutdownState): void {
-                $shutdownState->request('signal');
+                $shutdownState->request(ShutdownReason::SIGNAL);
             });
         }
 
@@ -72,7 +72,7 @@ final class ProcessManagerLoop
 
             if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
                 $this->logger->info('Process manager shutting down.', [
-                    'reason' => $shutdownState->getReason() ?? 'completed',
+                    'reason' => $shutdownState->getReason()?->value ?? 'completed',
                 ]);
                 return Command::SUCCESS;
             }
@@ -158,7 +158,7 @@ final class ProcessManagerLoop
 
         if ($failureCount > self::FAILURE_LIMIT) {
             $this->logger->error('Worker failure limit reached.', ['worker' => $worker->id]);
-            $shutdownState->request('failure_limit');
+            $shutdownState->request(ShutdownReason::FAILURE_LIMIT);
             $worker->markStopped();
             return false;
         }

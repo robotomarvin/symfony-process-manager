@@ -7,19 +7,19 @@ namespace SymfonyProcessManager\Command\Serve;
 final class ShutdownState
 {
     private bool $requested = false;
-    private ?string $reason = null;
+    private ?ShutdownReason $reason = null;
 
     public function isRequested(): bool
     {
         return $this->requested;
     }
 
-    public function getReason(): ?string
+    public function getReason(): ?ShutdownReason
     {
         return $this->reason;
     }
 
-    public function request(string $reason): void
+    public function request(ShutdownReason $reason): void
     {
         if ($this->requested) {
             return;
