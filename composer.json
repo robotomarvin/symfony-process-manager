@@ -40,5 +40,15 @@
         "symfony/doctrine-messenger": "^7.4",
         "symfony/framework-bundle": "^7.4",
         "symfony/yaml": "^7.4"
+    },
+    "scripts": {
+        "test": "./vendor/bin/phpunit",
+        "analyse": "./vendor/bin/phpstan analyse",
+        "cs": "./vendor/bin/php-cs-fixer check",
+        "cs-fix": "./vendor/bin/php-cs-fixer fix",
+        "check": [
+            "@analyse",
+            "@test"
+        ]
     }
 }
