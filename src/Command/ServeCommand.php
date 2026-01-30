@@ -68,22 +68,10 @@ final class ServeCommand extends Command
     {
         unset($output);
 
-        $workersOption = $input->getOption('workers');
-        $workerCount = is_numeric($workersOption)
-            ? max(1, (int) $workersOption)
-            : self::DEFAULT_WORKER_COUNT;
-        $workerTimeLimitOption = $input->getOption('worker-time-limit');
-        $workerTimeLimit = is_numeric($workerTimeLimitOption) && (int) $workerTimeLimitOption > 0
-            ? (int) $workerTimeLimitOption
-            : null;
-        $workerMessageLimitOption = $input->getOption('worker-message-limit');
-        $workerMessageLimit = is_numeric($workerMessageLimitOption) && (int) $workerMessageLimitOption > 0
-            ? (int) $workerMessageLimitOption
-            : null;
-        $workerMemoryLimitOption = $input->getOption('worker-memory-limit');
-        $workerMemoryLimit = is_string($workerMemoryLimitOption) && $workerMemoryLimitOption !== ''
-            ? $workerMemoryLimitOption
-            : null;
+        $workerCount = $this->parsePositiveInt($input, 'workers') ?? self::DEFAULT_WORKER_COUNT;
+        $workerTimeLimit = $this->parsePositiveInt($input, 'worker-time-limit');
+        $workerMessageLimit = $this->parsePositiveInt($input, 'worker-message-limit');
+        $workerMemoryLimit = $this->parseMemoryLimit($input);
 
         $loop = new ProcessManagerLoop(
             $this->clock,
@@ -97,5 +85,42 @@ final class ServeCommand extends Command
         );
 
         return $loop->run();
+    }
+
+    private function parsePositiveInt(InputInterface $input, string $option): ?int
+    {
+        $value = $input->getOption($option);
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (!\is_string($value) || !ctype_digit($value) || (int) $value < 1) {
+            throw new \InvalidArgumentException(sprintf(
+                'The --%s option must be a positive integer, got: %s',
+                $option,
+                \is_string($value) ? $value : get_debug_type($value),
+            ));
+        }
+
+        return (int) $value;
+    }
+
+    private function parseMemoryLimit(InputInterface $input): ?string
+    {
+        $value = $input->getOption('worker-memory-limit');
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (!\is_string($value) || !preg_match('/^\d+[KMG]?$/i', $value)) {
+            throw new \InvalidArgumentException(sprintf(
+                'The --worker-memory-limit option must be a valid memory value (e.g. 128M), got: %s',
+                \is_string($value) ? $value : get_debug_type($value),
+            ));
+        }
+
+        return $value;
     }
 }
