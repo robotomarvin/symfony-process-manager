@@ -29,8 +29,7 @@ final class ProcessManagerLoop
 
     public function run(): int
     {
-        $shutdownRequested = false;
-        $shutdownReason = null;
+        $shutdownState = new ShutdownState();
 
         $this->logger->info('Process manager server started.', [
             'workers' => $this->workerCount,
@@ -38,9 +37,8 @@ final class ProcessManagerLoop
 
         if (extension_loaded('pcntl') && function_exists('pcntl_signal') && function_exists('pcntl_async_signals')) {
             pcntl_async_signals(true);
-            pcntl_signal(SIGTERM, function () use (&$shutdownRequested, &$shutdownReason): void {
-                $shutdownRequested = true;
-                $shutdownReason = 'signal';
+            pcntl_signal(SIGTERM, static function () use ($shutdownState): void {
+                $shutdownState->request('signal');
             });
         }
 
@@ -51,7 +49,7 @@ final class ProcessManagerLoop
             $shouldSleep = true;
 
             foreach ($workers as $worker) {
-                if (!$shutdownRequested && $worker->shouldStart($now)) {
+                if (!$shutdownState->isRequested() && $worker->shouldStart($now)) {
                     $this->startWorker($worker);
                     $shouldSleep = false;
                     continue;
@@ -62,19 +60,19 @@ final class ProcessManagerLoop
                 }
 
                 if ($worker->isRunning()) {
-                    $this->handleRunningWorker($worker, $shutdownRequested);
+                    $this->handleRunningWorker($worker, $shutdownState);
                     continue;
                 }
 
-                $skipSleep = $this->handleWorkerExit($worker, $shutdownRequested, $shutdownReason, $now);
+                $skipSleep = $this->handleWorkerExit($worker, $shutdownState, $now);
                 if ($skipSleep) {
                     $shouldSleep = false;
                 }
             }
 
-            if ($shutdownRequested && $this->allWorkersStopped($workers)) {
+            if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
                 $this->logger->info('Process manager shutting down.', [
-                    'reason' => $shutdownReason ?? 'completed',
+                    'reason' => $shutdownState->getReason() ?? 'completed',
                 ]);
                 return Command::SUCCESS;
             }
@@ -117,9 +115,9 @@ final class ProcessManagerLoop
         ]);
     }
 
-    private function handleRunningWorker(WorkerState $worker, bool $shutdownRequested): void
+    private function handleRunningWorker(WorkerState $worker, ShutdownState $shutdownState): void
     {
-        if ($shutdownRequested && !$worker->isStopSignalSent()) {
+        if ($shutdownState->isRequested() && !$worker->isStopSignalSent()) {
             $worker->markStopSignalSent();
             $worker->getProcess()->signal(SIGTERM);
             $this->logger->info('Sent SIGTERM to worker.', ['worker' => $worker->id]);
@@ -128,8 +126,7 @@ final class ProcessManagerLoop
 
     private function handleWorkerExit(
         WorkerState $worker,
-        bool &$shutdownRequested,
-        ?string &$shutdownReason,
+        ShutdownState $shutdownState,
         float $now,
     ): bool {
         $exitCode = $worker->getProcess()->getExitCode();
@@ -144,7 +141,7 @@ final class ProcessManagerLoop
             'exit_code' => $exitCode,
         ]);
 
-        if ($shutdownRequested) {
+        if ($shutdownState->isRequested()) {
             $worker->markStopped();
             return false;
         }
@@ -161,8 +158,7 @@ final class ProcessManagerLoop
 
         if ($failureCount > self::FAILURE_LIMIT) {
             $this->logger->error('Worker failure limit reached.', ['worker' => $worker->id]);
-            $shutdownRequested = true;
-            $shutdownReason = 'failure_limit';
+            $shutdownState->request('failure_limit');
             $worker->markStopped();
             return false;
         }

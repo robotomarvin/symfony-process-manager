@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
+use SymfonyProcessManager\Command\Serve\ShutdownState;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
 use SymfonyProcessManager\Command\Serve\WorkerProcessFactory;
@@ -18,6 +19,7 @@ use SymfonyProcessManager\Tests\Support\ConsoleProcessSession;
 
 #[CoversClass(ServeCommand::class)]
 #[CoversClass(ProcessManagerLoop::class)]
+#[CoversClass(ShutdownState::class)]
 #[CoversClass(WorkerOutputFormatter::class)]
 #[CoversClass(WorkerOutputHandler::class)]
 #[CoversClass(WorkerProcessFactory::class)]
