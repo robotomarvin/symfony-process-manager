@@ -78,20 +78,14 @@ final class ConsoleProcessSession
                 continue;
             }
 
-            $decoded = json_decode($line, true);
+            $record = JsonLogParser::parseRecord($line);
 
-            if (!is_array($decoded) || !isset($decoded['level'])) {
+            if ($record === null) {
                 continue;
             }
 
-            $record = [
-                'level' => (string) $decoded['level'],
-                'message' => isset($decoded['message']) ? (string) $decoded['message'] : '',
-                'context' => isset($decoded['context']) && is_array($decoded['context']) ? $decoded['context'] : [],
-            ];
-
             if ($this->assertNoWarnings) {
-                $this->assertNoWarnings([$record]);
+                JsonLogParser::assertNoWarnings([$record]);
             }
             $this->records[] = $record;
             $newRecords[] = $record;
@@ -149,31 +143,4 @@ final class ConsoleProcessSession
         $this->process->signal($signal);
     }
 
-    /**
-     * @param array<int, array{level: string, message: string, context: array<string, mixed>}> $records
-     */
-    private function assertNoWarnings(array $records): void
-    {
-        $violations = [];
-
-        foreach ($records as $record) {
-            $level = $record['level'];
-            $severity = ConsoleProcessRunner::LOG_LEVELS[$level] ?? null;
-
-            if ($severity === null) {
-                continue;
-            }
-
-            if ($severity >= ConsoleProcessRunner::WARNING_LEVELS['warning']) {
-                $violations[] = sprintf('%s: %s', $level, $record['message']);
-            }
-        }
-
-        if ($violations !== []) {
-            throw new RuntimeException(sprintf(
-                "Detected warning+ log entries:\n%s",
-                implode("\n", $violations),
-            ));
-        }
-    }
 }

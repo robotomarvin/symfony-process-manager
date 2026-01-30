@@ -9,25 +9,6 @@ use Symfony\Component\Process\Process;
 
 final class ConsoleProcessRunner
 {
-    public const WARNING_LEVELS = [
-        'warning' => 300,
-        'error' => 400,
-        'critical' => 500,
-        'alert' => 550,
-        'emergency' => 600,
-    ];
-
-    public const LOG_LEVELS = [
-        'debug' => 100,
-        'info' => 200,
-        'notice' => 250,
-        'warning' => 300,
-        'error' => 400,
-        'critical' => 500,
-        'alert' => 550,
-        'emergency' => 600,
-    ];
-
     private const DEFAULT_TIMEOUT = 30;
 
     /**
@@ -42,10 +23,10 @@ final class ConsoleProcessRunner
 
         $stdout = $process->getOutput();
         $stderr = $process->getErrorOutput();
-        $records = $this->parseJsonLogs($stdout);
+        $records = JsonLogParser::parseRecords($stdout);
 
         if ($assertNoWarnings) {
-            $this->assertNoWarnings($records);
+            JsonLogParser::assertNoWarnings($records);
         }
 
         if (!$process->isSuccessful()) {
@@ -97,67 +78,4 @@ final class ConsoleProcessRunner
         );
     }
 
-    /**
-     * @return array<int, array{level: string, message: string, context: array<string, mixed>}>
-     */
-    private function parseJsonLogs(string $stdout): array
-    {
-        $records = [];
-
-        $lines = preg_split('/\r?\n/', $stdout);
-
-        if ($lines === false) {
-            throw new RuntimeException('Unable to split stdout into log lines.');
-        }
-
-        foreach ($lines as $line) {
-            $line = trim($line);
-
-            if ($line === '') {
-                continue;
-            }
-
-            $decoded = json_decode($line, true);
-
-            if (!is_array($decoded) || !isset($decoded['level'])) {
-                continue;
-            }
-
-            $records[] = [
-                'level' => (string) $decoded['level'],
-                'message' => isset($decoded['message']) ? (string) $decoded['message'] : '',
-                'context' => isset($decoded['context']) && is_array($decoded['context']) ? $decoded['context'] : [],
-            ];
-        }
-
-        return $records;
-    }
-
-    /**
-     * @param array<int, array{level: string, message: string, context: array<string, mixed>}> $records
-     */
-    private function assertNoWarnings(array $records): void
-    {
-        $violations = [];
-
-        foreach ($records as $record) {
-            $level = $record['level'];
-            $severity = self::LOG_LEVELS[$level] ?? null;
-
-            if ($severity === null) {
-                continue;
-            }
-
-            if ($severity >= self::WARNING_LEVELS['warning']) {
-                $violations[] = sprintf('%s: %s', $level, $record['message']);
-            }
-        }
-
-        if ($violations !== []) {
-            throw new RuntimeException(sprintf(
-                "Detected warning+ log entries:\n%s",
-                implode("\n", $violations),
-            ));
-        }
-    }
 }

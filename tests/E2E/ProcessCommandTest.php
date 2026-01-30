@@ -230,9 +230,11 @@ final class ProcessCommandTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed>
+     * @template T
+     * @param callable(string): (T|null) $lineProcessor
+     * @return T
      */
-    private function waitForStdoutJsonLine(ConsoleProcessSession $session, callable $predicate, float $timeout): array
+    private function waitForStdoutLineMatching(ConsoleProcessSession $session, callable $lineProcessor, float $timeout): mixed
     {
         $start = microtime(true);
         $offset = 0;
@@ -257,50 +259,10 @@ final class ProcessCommandTest extends TestCase
                     continue;
                 }
 
-                $decoded = json_decode($line, true);
+                $result = $lineProcessor($line);
 
-                if (!is_array($decoded)) {
-                    continue;
-                }
-
-                if ($predicate($decoded)) {
-                    return $decoded;
-                }
-            }
-
-            usleep(100000);
-        }
-
-        throw new \RuntimeException('Timed out waiting for JSON stdout line.');
-    }
-
-    private function waitForStdoutLine(ConsoleProcessSession $session, callable $predicate, float $timeout): string
-    {
-        $start = microtime(true);
-        $offset = 0;
-        $buffer = '';
-
-        while ((microtime(true) - $start) < $timeout) {
-            $session->collectRecords();
-            $stdout = $session->getStdout();
-            $length = strlen($stdout);
-
-            if ($length > $offset) {
-                $buffer .= substr($stdout, $offset);
-                $offset = $length;
-            }
-
-            while (($newlinePosition = strpos($buffer, "\n")) !== false) {
-                $line = substr($buffer, 0, $newlinePosition);
-                $buffer = substr($buffer, $newlinePosition + 1);
-                $line = trim($line);
-
-                if ($line === '') {
-                    continue;
-                }
-
-                if ($predicate($line)) {
-                    return $line;
+                if ($result !== null) {
+                    return $result;
                 }
             }
 
@@ -308,6 +270,37 @@ final class ProcessCommandTest extends TestCase
         }
 
         throw new \RuntimeException('Timed out waiting for stdout line.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function waitForStdoutJsonLine(ConsoleProcessSession $session, callable $predicate, float $timeout): array
+    {
+        return $this->waitForStdoutLineMatching(
+            $session,
+            static function (string $line) use ($predicate): ?array {
+                $decoded = json_decode($line, true);
+
+                if (!is_array($decoded)) {
+                    return null;
+                }
+
+                return $predicate($decoded) ? $decoded : null;
+            },
+            $timeout,
+        );
+    }
+
+    private function waitForStdoutLine(ConsoleProcessSession $session, callable $predicate, float $timeout): string
+    {
+        return $this->waitForStdoutLineMatching(
+            $session,
+            static function (string $line) use ($predicate): ?string {
+                return $predicate($line) ? $line : null;
+            },
+            $timeout,
+        );
     }
 
     private function signalPid(int $pid, int $signal): void
