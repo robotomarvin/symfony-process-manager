@@ -673,41 +673,23 @@ final class FakeLoop implements LoopInterface
         }
     }
 
-    public function cancelTimer(TimerInterface $timer): void
-    {
-    }
+    public function cancelTimer(TimerInterface $timer): void {}
 
-    public function futureTick($listener): void
-    {
-    }
+    public function futureTick($listener): void {}
 
-    public function addSignal($signal, $listener): void
-    {
-    }
+    public function addSignal($signal, $listener): void {}
 
-    public function removeSignal($signal, $listener): void
-    {
-    }
+    public function removeSignal($signal, $listener): void {}
 
-    public function addReadStream($stream, $listener): void
-    {
-    }
+    public function addReadStream($stream, $listener): void {}
 
-    public function addWriteStream($stream, $listener): void
-    {
-    }
+    public function addWriteStream($stream, $listener): void {}
 
-    public function removeReadStream($stream): void
-    {
-    }
+    public function removeReadStream($stream): void {}
 
-    public function removeWriteStream($stream): void
-    {
-    }
+    public function removeWriteStream($stream): void {}
 
-    public function run(): void
-    {
-    }
+    public function run(): void {}
 
     public function stop(): void
     {
