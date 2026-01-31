@@ -20,6 +20,8 @@ final class SymfonyProcessManagerExtension extends Extension
         $config = $this->processConfiguration(new Configuration(), $configs);
 
         $container->getDefinition(ServeCommand::class)
-            ->setArgument('$transportConfigs', $config['transports']);
+            ->setArgument('$transportConfigs', $config['transports'])
+            ->setArgument('$httpHost', $config['http_server']['host'])
+            ->setArgument('$httpPort', $config['http_server']['port']);
     }
 }

@@ -15,6 +15,13 @@ final class Configuration implements ConfigurationInterface
 
         $treeBuilder->getRootNode()
             ->children()
+                ->arrayNode('http_server')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->scalarNode('host')->defaultValue('127.0.0.1')->end()
+                        ->integerNode('port')->defaultValue(9100)->min(0)->end()
+                    ->end()
+                ->end()
                 ->arrayNode('transports')
                     ->isRequired()
                     ->requiresAtLeastOneElement()

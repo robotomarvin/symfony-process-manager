@@ -12,6 +12,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use React\EventLoop\Loop;
 use SymfonyProcessManager\Command\Serve\ConsumeArgs;
+use SymfonyProcessManager\Command\Serve\HttpServer;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\TransportConfig;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
@@ -49,7 +50,10 @@ final class ServeCommand extends Command
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
+        private readonly HttpServer $httpServer,
         array $transportConfigs,
+        private readonly string $httpHost = '127.0.0.1',
+        private readonly int $httpPort = 9100,
     ) {
         $this->resolvedTransportConfigs = self::buildTransportConfigs($transportConfigs);
         parent::__construct();
@@ -116,6 +120,8 @@ final class ServeCommand extends Command
         );
 
         $eventLoop = Loop::get();
+
+        $this->httpServer->start($eventLoop, $this->httpHost, $this->httpPort);
 
         return $loop->run($eventLoop);
     }

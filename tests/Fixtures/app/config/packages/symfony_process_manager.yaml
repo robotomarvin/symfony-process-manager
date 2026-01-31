@@ -1,4 +1,6 @@
 symfony_process_manager:
+    http_server:
+        port: 0
     transports:
         async:
             processes: 1
