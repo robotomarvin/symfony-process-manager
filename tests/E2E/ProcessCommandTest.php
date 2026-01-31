@@ -78,6 +78,31 @@ final class ProcessCommandTest extends TestCase
         }
     }
 
+    public function testMetricsEndpointResponds(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $httpRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'HTTP server listening.',
+                5.0,
+            );
+
+            $address = $httpRecord['context']['address'] ?? null;
+            self::assertIsString($address);
+
+            $address = str_replace('tcp://', '', $address);
+            $url = "http://{$address}/metrics";
+            $response = @file_get_contents($url);
+
+            self::assertIsString($response);
+            self::assertNotSame('{"status":"ok"}', $response);
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     public function testExpectedExitRestartsImmediately(): void
     {
         $runner = new ConsoleProcessRunner();
