@@ -7,6 +7,7 @@ namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
+use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 #[CoversClass(WorkerOutputFormatter::class)]
 final class WorkerOutputFormatterTest extends TestCase
@@ -16,6 +17,11 @@ final class WorkerOutputFormatterTest extends TestCase
     protected function setUp(): void
     {
         $this->formatter = new WorkerOutputFormatter();
+    }
+
+    private function createFormatterWithMetrics(MetricsRegistry $metrics): WorkerOutputFormatter
+    {
+        return new WorkerOutputFormatter($metrics);
     }
 
     public function testJsonWithNoExtraKeyAddsWorkerIdInExtra(): void
@@ -135,6 +141,46 @@ final class WorkerOutputFormatterTest extends TestCase
         $result = $this->formatter->format(99, 'hello');
 
         self::assertSame('[worker 99] hello', $result);
+    }
+
+    public function testJsonWithHandledSuccessfullyIncrementsCounter(): void
+    {
+        $metrics = new MetricsRegistry();
+        $formatter = $this->createFormatterWithMetrics($metrics);
+        $input = json_encode([
+            'message' => 'Received message App\Message\TestMessage was handled successfully (acknowledging to transport).',
+            'context' => [],
+        ], JSON_THROW_ON_ERROR);
+
+        $formatter->format(1, $input, 'async');
+
+        $output = $metrics->toPrometheusText();
+        self::assertStringContainsString('messages_processed_total{transport="async"} 1', $output);
+    }
+
+    public function testJsonWithoutHandledSuccessfullyDoesNotIncrementCounter(): void
+    {
+        $metrics = new MetricsRegistry();
+        $formatter = $this->createFormatterWithMetrics($metrics);
+        $input = json_encode([
+            'message' => 'Some other log message.',
+            'context' => [],
+        ], JSON_THROW_ON_ERROR);
+
+        $formatter->format(1, $input, 'async');
+
+        $output = $metrics->toPrometheusText();
+        self::assertStringNotContainsString('messages_processed_total', $output);
+    }
+
+    public function testPlainTextDoesNotIncrementCounter(): void
+    {
+        $metrics = new MetricsRegistry();
+        $formatter = $this->createFormatterWithMetrics($metrics);
+        $formatter->format(1, 'was handled successfully (acknowledging to transport).', 'async');
+
+        $output = $metrics->toPrometheusText();
+        self::assertStringNotContainsString('messages_processed_total', $output);
     }
 
     /**

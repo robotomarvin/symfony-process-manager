@@ -13,6 +13,9 @@ final class WorkerOutputHandler
      */
     private array $buffers = [];
 
+    /** @var array<int, string> */
+    private array $workerTransports = [];
+
     /** @var resource */
     private mixed $stdoutStream;
 
@@ -33,6 +36,11 @@ final class WorkerOutputHandler
 
         assert(\is_resource($this->stdoutStream), 'stdoutStream must be a resource');
         assert(\is_resource($this->stderrStream), 'stderrStream must be a resource');
+    }
+
+    public function registerWorker(int $workerId, string $transport): void
+    {
+        $this->workerTransports[$workerId] = $transport;
     }
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
@@ -86,7 +94,7 @@ final class WorkerOutputHandler
 
     private function forwardLine(int $workerId, string $type, string $line): void
     {
-        $payload = $this->formatter->format($workerId, $line);
+        $payload = $this->formatter->format($workerId, $line, $this->workerTransports[$workerId] ?? '');
         $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);
         fflush($stream);

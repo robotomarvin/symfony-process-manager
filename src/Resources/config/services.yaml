@@ -11,3 +11,4 @@ services:
     SymfonyProcessManager\Command\Serve\WorkerOutputFormatter: ~
     SymfonyProcessManager\Command\Serve\WorkerOutputHandler: ~
     SymfonyProcessManager\Command\Serve\HttpServer: ~
+    SymfonyProcessManager\Metrics\MetricsRegistry: ~

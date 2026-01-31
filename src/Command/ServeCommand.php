@@ -17,6 +17,7 @@ use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\TransportConfig;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
 use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
+use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 #[AsCommand(
     name: 'pm:serve',
@@ -51,6 +52,7 @@ final class ServeCommand extends Command
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
         private readonly HttpServer $httpServer,
+        private readonly MetricsRegistry $metrics,
         array $transportConfigs,
         private readonly string $httpHost = '127.0.0.1',
         private readonly int $httpPort = 9100,
@@ -117,6 +119,7 @@ final class ServeCommand extends Command
             $this->processFactory,
             $this->outputHandler,
             $this->resolvedTransportConfigs,
+            $this->metrics,
         );
 
         $eventLoop = Loop::get();

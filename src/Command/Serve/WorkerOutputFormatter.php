@@ -4,13 +4,24 @@ declare(strict_types=1);
 
 namespace SymfonyProcessManager\Command\Serve;
 
+use SymfonyProcessManager\Metrics\MetricsRegistry;
+
 final class WorkerOutputFormatter
 {
-    public function format(int $workerId, string $line): string
+    public function __construct(
+        private readonly ?MetricsRegistry $metrics = null,
+    ) {}
+
+    public function format(int $workerId, string $line, string $transport = ''): string
     {
         $decoded = json_decode($line, true);
 
         if (is_array($decoded) && $this->isAssociativeArray($decoded)) {
+            if ($this->metrics !== null && isset($decoded['message']) && is_string($decoded['message'])
+                && str_contains($decoded['message'], 'was handled successfully (acknowledging to transport).')) {
+                $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $transport]);
+            }
+
             $extra = $decoded['extra'] ?? null;
             $decoded['extra'] = is_array($extra) ? $extra : [];
             $decoded['extra']['worker_id'] = $workerId;

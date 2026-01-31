@@ -19,6 +19,7 @@ use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
 use SymfonyProcessManager\Command\Serve\TransportConfig;
 use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
+use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 #[CoversClass(ProcessManagerLoop::class)]
 final class ProcessManagerLoopTest extends TestCase
@@ -26,11 +27,13 @@ final class ProcessManagerLoopTest extends TestCase
     private AutoAdvancingClock $clock;
     private WorkerOutputHandler $outputHandler;
     private ArrayLogger $logger;
+    private MetricsRegistry $metrics;
 
     protected function setUp(): void
     {
         $this->clock = new AutoAdvancingClock(1704067200.0, 1.0);
         $this->logger = new ArrayLogger();
+        $this->metrics = new MetricsRegistry();
 
         $stdout = fopen('php://memory', 'r+');
         self::assertIsResource($stdout);
@@ -38,7 +41,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertIsResource($stderr);
 
         $this->outputHandler = new WorkerOutputHandler(
-            new WorkerOutputFormatter(),
+            new WorkerOutputFormatter($this->metrics),
             $stdout,
             $stderr,
         );
@@ -58,6 +61,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -83,6 +87,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -109,6 +114,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -131,6 +137,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -152,6 +159,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async', processes: 3)],
+            metrics: $this->metrics,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -179,6 +187,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -202,6 +211,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -233,6 +243,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async', consumeArgs: $consumeArgs)],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -257,6 +268,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -279,6 +291,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -301,6 +314,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -325,6 +339,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $this->runTicksUntilDone($loop);
@@ -349,6 +364,7 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
         );
 
         $fakeLoop = new FakeLoop();
@@ -373,12 +389,128 @@ final class ProcessManagerLoopTest extends TestCase
             $factory,
             $this->outputHandler,
             transportConfigs: [TransportConfig::create(transport: 'async', pollIntervalMs: 200)],
+            metrics: $this->metrics,
         );
 
         $fakeLoop = new FakeLoop();
         $processManagerLoop->run($fakeLoop);
 
         self::assertSame(0.2, $fakeLoop->getPeriodicTimerInterval());
+    }
+
+    public function testWorkerStartIncrementsStartCounter(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('worker_starts_total{transport="async"}', $output);
+    }
+
+    public function testWorkerFailureIncrementsFailureCounter(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('worker_failures_total{transport="async"}', $output);
+    }
+
+    public function testWorkerBackoffIncrementsBackoffCounter(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('worker_backoffs_total{transport="async"}', $output);
+    }
+
+    public function testWorkerExitIncrementsExitCounterWithExitCodeLabel(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('worker_exits_total{exit_code="1"}', $output);
+    }
+
+    public function testRunningGaugeIsSetDuringTick(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+            metrics: $this->metrics,
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('process_manager_running', $output);
     }
 
     private function runTicksUntilDone(ProcessManagerLoop $loop, int $maxTicks = 100): int

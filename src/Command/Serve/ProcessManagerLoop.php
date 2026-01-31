@@ -9,6 +9,7 @@ use React\EventLoop\LoopInterface;
 use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
+use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 final class ProcessManagerLoop
 {
@@ -21,6 +22,7 @@ final class ProcessManagerLoop
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
         private readonly array $transportConfigs,
+        private readonly MetricsRegistry $metrics,
     ) {}
 
     public function run(LoopInterface $loop): int
@@ -64,6 +66,8 @@ final class ProcessManagerLoop
      */
     public function tick(array &$workers, ShutdownState $shutdownState): ?int
     {
+        $this->metrics->setGauge('process_manager_running', $shutdownState->isRequested() ? 0.0 : 1.0, 'Whether the process manager is running');
+
         $now = (float) $this->clock->now()->format('U.u');
 
         foreach ($workers as [$worker, $config]) {
@@ -118,11 +122,13 @@ final class ProcessManagerLoop
             $config->transport,
             $config->consumeArgs,
         ));
+        $this->outputHandler->registerWorker($worker->id, $config->transport);
         $workerId = $worker->id;
         $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {
             $this->outputHandler->handleOutput($workerId, $type, $buffer);
         });
         $worker->markStarted();
+        $this->metrics->incrementCounter('worker_starts', 'Total number of worker starts', ['transport' => $config->transport]);
         $this->logger->info('Worker started.', [
             'worker' => $worker->id,
             'transport' => $config->transport,
@@ -157,6 +163,7 @@ final class ProcessManagerLoop
             'pid' => $pid,
             'exit_code' => $exitCode,
         ]);
+        $this->metrics->incrementCounter('worker_exits', 'Total number of worker exits', ['exit_code' => (string) $exitCode]);
 
         if ($shutdownState->isRequested()) {
             $worker->markStopped();
@@ -171,6 +178,7 @@ final class ProcessManagerLoop
         }
 
         $worker->recordFailure($now, $config->failureWindowSeconds);
+        $this->metrics->incrementCounter('worker_failures', 'Total number of worker failures', ['transport' => $config->transport]);
         $failureCount = $worker->getFailureCount();
 
         if ($failureCount > $config->failureLimit) {
@@ -189,6 +197,7 @@ final class ProcessManagerLoop
         );
 
         $worker->scheduleRestart($now, $delaySeconds);
+        $this->metrics->incrementCounter('worker_backoffs', 'Total number of worker backoffs', ['transport' => $config->transport]);
         $this->logger->warning('Worker restarting after unexpected exit.', [
             'worker' => $worker->id,
             'delay_seconds' => $delaySeconds,
