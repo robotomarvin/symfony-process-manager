@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\Command\Serve;
 
 use Psr\Log\LoggerInterface;
+use React\EventLoop\LoopInterface;
+use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 
@@ -21,7 +23,7 @@ final class ProcessManagerLoop
         private readonly array $transportConfigs,
     ) {}
 
-    public function run(): int
+    public function run(LoopInterface $loop): int
     {
         $shutdownState = new ShutdownState();
         $workers = $this->initializeWorkers();
@@ -35,58 +37,67 @@ final class ProcessManagerLoop
             ),
         ]);
 
-        if (extension_loaded('pcntl') && function_exists('pcntl_signal') && function_exists('pcntl_async_signals')) {
-            pcntl_async_signals(true);
-            pcntl_signal(SIGTERM, static function () use ($shutdownState): void {
-                $shutdownState->request(ShutdownReason::SIGNAL);
-            });
+        $loop->addSignal(SIGTERM, static function () use ($shutdownState): void {
+            $shutdownState->request(ShutdownReason::SIGNAL);
+        });
+
+        $intervalSec = $this->getMinPollIntervalMicroseconds() / 1_000_000;
+        $exitCode = Command::SUCCESS;
+
+        $loop->addPeriodicTimer($intervalSec, function (TimerInterface $timer) use ($loop, &$workers, $shutdownState, &$exitCode): void {
+            $result = $this->tick($workers, $shutdownState);
+
+            if ($result !== null) {
+                $exitCode = $result;
+                $loop->cancelTimer($timer);
+                $loop->stop();
+            }
+        });
+
+        $loop->run();
+
+        return $exitCode;
+    }
+
+    /**
+     * @param list<array{WorkerState, TransportConfig}> $workers
+     */
+    public function tick(array &$workers, ShutdownState $shutdownState): ?int
+    {
+        $now = (float) $this->clock->now()->format('U.u');
+
+        foreach ($workers as [$worker, $config]) {
+            if (!$shutdownState->isRequested() && $worker->shouldStart($now)) {
+                $this->startWorker($worker, $config);
+                continue;
+            }
+
+            if (!$worker->hasProcess()) {
+                continue;
+            }
+
+            if ($worker->isRunning()) {
+                $this->handleRunningWorker($worker, $shutdownState);
+                continue;
+            }
+
+            $this->handleWorkerExit($worker, $config, $shutdownState, $now);
         }
 
-        $minPollIntervalUs = $this->getMinPollIntervalMicroseconds();
-
-        while (true) {
-            $now = (float) $this->clock->now()->format('U.u');
-            $shouldSleep = true;
-
-            foreach ($workers as [$worker, $config]) {
-                if (!$shutdownState->isRequested() && $worker->shouldStart($now)) {
-                    $this->startWorker($worker, $config);
-                    $shouldSleep = false;
-                    continue;
-                }
-
-                if (!$worker->hasProcess()) {
-                    continue;
-                }
-
-                if ($worker->isRunning()) {
-                    $this->handleRunningWorker($worker, $shutdownState);
-                    continue;
-                }
-
-                $skipSleep = $this->handleWorkerExit($worker, $config, $shutdownState, $now);
-                if ($skipSleep) {
-                    $shouldSleep = false;
-                }
-            }
-
-            if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
-                $this->logger->info('Process manager shutting down.', [
-                    'reason' => $shutdownState->getReason()?->value ?? 'completed',
-                ]);
-                return Command::SUCCESS;
-            }
-
-            if ($shouldSleep) {
-                usleep($minPollIntervalUs);
-            }
+        if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
+            $this->logger->info('Process manager shutting down.', [
+                'reason' => $shutdownState->getReason()?->value ?? 'completed',
+            ]);
+            return Command::SUCCESS;
         }
+
+        return null;
     }
 
     /**
      * @return list<array{WorkerState, TransportConfig}>
      */
-    private function initializeWorkers(): array
+    public function initializeWorkers(): array
     {
         $workers = [];
         $workerId = 1;
@@ -133,7 +144,7 @@ final class ProcessManagerLoop
         TransportConfig $config,
         ShutdownState $shutdownState,
         float $now,
-    ): bool {
+    ): void {
         $exitCode = $worker->getProcess()->getExitCode();
         $pid = $worker->getProcess()->getPid();
         $this->outputHandler->flush($worker->id);
@@ -149,14 +160,14 @@ final class ProcessManagerLoop
 
         if ($shutdownState->isRequested()) {
             $worker->markStopped();
-            return false;
+            return;
         }
 
         if ($exitCode === 0) {
             $worker->clearFailures();
             $worker->scheduleImmediateRestart($now);
             $this->logger->info('Worker restarting after expected exit.', ['worker' => $worker->id]);
-            return true;
+            return;
         }
 
         $worker->recordFailure($now, $config->failureWindowSeconds);
@@ -169,7 +180,7 @@ final class ProcessManagerLoop
             ]);
             $shutdownState->request(ShutdownReason::FAILURE_LIMIT);
             $worker->markStopped();
-            return false;
+            return;
         }
 
         $delaySeconds = min(
@@ -183,8 +194,6 @@ final class ProcessManagerLoop
             'delay_seconds' => $delaySeconds,
             'attempt' => $failureCount,
         ]);
-
-        return false;
     }
 
     /**

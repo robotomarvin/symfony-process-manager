@@ -10,6 +10,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use React\EventLoop\Loop;
 use SymfonyProcessManager\Command\Serve\ConsumeArgs;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\TransportConfig;
@@ -114,6 +115,8 @@ final class ServeCommand extends Command
             $this->resolvedTransportConfigs,
         );
 
-        return $loop->run();
+        $eventLoop = Loop::get();
+
+        return $loop->run($eventLoop);
     }
 }

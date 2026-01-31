@@ -7,11 +7,14 @@ namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use React\EventLoop\LoopInterface;
+use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Command\Serve\ConsumeArgs;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
+use SymfonyProcessManager\Command\Serve\ShutdownState;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
 use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
 use SymfonyProcessManager\Command\Serve\TransportConfig;
@@ -57,7 +60,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $exitCode = $loop->run();
+        $exitCode = $this->runTicksUntilDone($loop);
 
         self::assertSame(Command::SUCCESS, $exitCode);
         self::assertTrue($this->logger->hasMessage('Worker failure limit reached.'));
@@ -68,9 +71,7 @@ final class ProcessManagerLoopTest extends TestCase
     public function testCleanExitRestartsImmediately(): void
     {
         $factory = new FakeProcessFactory();
-        // First process exits cleanly (code 0) -> immediate restart
         $factory->addProcess($this->createExitedProcess(0));
-        // Then 4 failures to trigger shutdown
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
@@ -84,7 +85,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $exitCode = $loop->run();
+        $exitCode = $this->runTicksUntilDone($loop);
 
         self::assertSame(Command::SUCCESS, $exitCode);
         self::assertTrue($this->logger->hasMessage('Worker restarting after expected exit.'));
@@ -94,12 +95,9 @@ final class ProcessManagerLoopTest extends TestCase
     public function testCleanExitClearsFailureHistory(): void
     {
         $factory = new FakeProcessFactory();
-        // 2 failures
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
-        // Clean exit clears failures
         $factory->addProcess($this->createExitedProcess(0));
-        // 4 more failures needed to reach limit (fresh counter)
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
@@ -113,10 +111,9 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $exitCode = $loop->run();
+        $exitCode = $this->runTicksUntilDone($loop);
 
         self::assertSame(Command::SUCCESS, $exitCode);
-        // Total processes: 2 + 1 + 4 = 7
         self::assertSame(7, $factory->getCreateCount());
     }
 
@@ -136,7 +133,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $delays = $this->logger->getDelaySeconds();
         self::assertSame([1, 2, 4], $delays);
@@ -145,10 +142,6 @@ final class ProcessManagerLoopTest extends TestCase
     public function testMultipleWorkersAreCreated(): void
     {
         $factory = new FakeProcessFactory();
-        // 3 workers, each needs 4 failures to trigger shutdown
-        // But once shutdown is requested for one worker, others are stopped too
-        // Worker 1: 4 failures -> shutdown requested
-        // Workers 2 and 3: may have started or be waiting
         for ($i = 0; $i < 20; $i++) {
             $factory->addProcess($this->createExitedProcess(1));
         }
@@ -161,12 +154,11 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async', processes: 3)],
         );
 
-        $exitCode = $loop->run();
+        $exitCode = $this->runTicksUntilDone($loop);
 
         self::assertSame(Command::SUCCESS, $exitCode);
         self::assertTrue($this->logger->hasMessage('Worker failure limit reached.'));
 
-        // All 3 workers should have started at least once
         $startedWorkerIds = $this->logger->getStartedWorkerIds();
         self::assertContains(1, $startedWorkerIds);
         self::assertContains(2, $startedWorkerIds);
@@ -189,7 +181,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $startRecord = $this->logger->findRecord('Process manager server started.');
         self::assertNotNull($startRecord);
@@ -212,7 +204,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $exitRecord = $this->logger->findRecord('Worker exited.');
         self::assertNotNull($exitRecord);
@@ -243,7 +235,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async', consumeArgs: $consumeArgs)],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $calls = $factory->getCreateCalls();
         self::assertNotEmpty($calls);
@@ -254,7 +246,6 @@ final class ProcessManagerLoopTest extends TestCase
     public function testNullExitCodeTreatedAsFailure(): void
     {
         $factory = new FakeProcessFactory();
-        // Create processes that return null exit code
         $factory->addProcess($this->createExitedProcess(null));
         $factory->addProcess($this->createExitedProcess(null));
         $factory->addProcess($this->createExitedProcess(null));
@@ -268,7 +259,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $exitCode = $loop->run();
+        $exitCode = $this->runTicksUntilDone($loop);
 
         self::assertSame(Command::SUCCESS, $exitCode);
         self::assertTrue($this->logger->hasMessage('Worker failure limit reached.'));
@@ -290,7 +281,7 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $shutdownRecord = $this->logger->findRecord('Process manager shutting down.');
         self::assertNotNull($shutdownRecord);
@@ -312,11 +303,9 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $delays = $this->logger->getDelaySeconds();
-        // First failure: delay=1, second: delay=2, third: delay=4
-        // Fourth failure: >3 failures -> shutdown (no delay logged)
         self::assertSame(1, $delays[0]);
         self::assertSame(2, $delays[1]);
         self::assertSame(4, $delays[2]);
@@ -338,12 +327,79 @@ final class ProcessManagerLoopTest extends TestCase
             transportConfigs: [TransportConfig::create(transport: 'async')],
         );
 
-        $loop->run();
+        $this->runTicksUntilDone($loop);
 
         $startRecord = $this->logger->findRecord('Worker started.');
         self::assertNotNull($startRecord);
         self::assertArrayHasKey('pid', $startRecord['context']);
         self::assertArrayHasKey('worker', $startRecord['context']);
+    }
+
+    public function testRunWithFakeLoopReturnsCorrectExitCode(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $processManagerLoop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async')],
+        );
+
+        $fakeLoop = new FakeLoop();
+        $exitCode = $processManagerLoop->run($fakeLoop);
+
+        self::assertSame(Command::SUCCESS, $exitCode);
+        self::assertTrue($this->logger->hasMessage('Worker failure limit reached.'));
+        self::assertTrue($fakeLoop->wasStopped());
+    }
+
+    public function testRunRegistersPeriodicTimerWithCorrectInterval(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $processManagerLoop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: [TransportConfig::create(transport: 'async', pollIntervalMs: 200)],
+        );
+
+        $fakeLoop = new FakeLoop();
+        $processManagerLoop->run($fakeLoop);
+
+        self::assertSame(0.2, $fakeLoop->getPeriodicTimerInterval());
+    }
+
+    private function runTicksUntilDone(ProcessManagerLoop $loop, int $maxTicks = 100): int
+    {
+        $shutdownState = new ShutdownState();
+        $workers = $loop->initializeWorkers();
+
+        $this->logger->info('Process manager server started.', [
+            'workers' => count($workers),
+            'transports' => ['async'],
+        ]);
+
+        for ($i = 0; $i < $maxTicks; $i++) {
+            $result = $loop->tick($workers, $shutdownState);
+
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        self::fail('Loop did not terminate within ' . $maxTicks . ' ticks');
     }
 
     private function createExitedProcess(?int $exitCode): Process
@@ -450,6 +506,110 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
     public function getCreateCalls(): array
     {
         return $this->createCalls;
+    }
+}
+
+/**
+ * A fake ReactPHP event loop for testing run() integration.
+ * Captures the periodic timer callback and runs it synchronously until stop() is called.
+ */
+final class FakeLoop implements LoopInterface
+{
+    private bool $stopped = false;
+    private ?float $periodicTimerInterval = null;
+
+    public function addTimer($interval, $callback): TimerInterface
+    {
+        return $this->createMockTimer();
+    }
+
+    public function addPeriodicTimer($interval, $callback): TimerInterface
+    {
+        $this->periodicTimerInterval = (float) $interval;
+        $timer = $this->createMockTimer();
+
+        $this->stopped = false;
+        $this->runTimerCallback($callback, $timer, 200);
+
+        return $timer;
+    }
+
+    private function runTimerCallback(callable $callback, TimerInterface $timer, int $maxIterations): void
+    {
+        for ($i = 0; $i < $maxIterations && !$this->stopped; $i++) {
+            $callback($timer);
+        }
+    }
+
+    public function cancelTimer(TimerInterface $timer): void
+    {
+    }
+
+    public function futureTick($listener): void
+    {
+    }
+
+    public function addSignal($signal, $listener): void
+    {
+    }
+
+    public function removeSignal($signal, $listener): void
+    {
+    }
+
+    public function addReadStream($stream, $listener): void
+    {
+    }
+
+    public function addWriteStream($stream, $listener): void
+    {
+    }
+
+    public function removeReadStream($stream): void
+    {
+    }
+
+    public function removeWriteStream($stream): void
+    {
+    }
+
+    public function run(): void
+    {
+    }
+
+    public function stop(): void
+    {
+        $this->stopped = true;
+    }
+
+    public function wasStopped(): bool
+    {
+        return $this->stopped;
+    }
+
+    public function getPeriodicTimerInterval(): ?float
+    {
+        return $this->periodicTimerInterval;
+    }
+
+    private function createMockTimer(): TimerInterface
+    {
+        return new class implements TimerInterface {
+            public function getInterval(): float
+            {
+                return 0.0;
+            }
+
+            public function isPeriodic(): bool
+            {
+                return true;
+            }
+
+            public function getCallback(): callable
+            {
+                return static function (): void {};
+            }
+        };
     }
 }
 
