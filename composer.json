@@ -28,7 +28,10 @@
         "symfony/http-kernel": "^7.4",
         "symfony/messenger": "^7.4",
         "symfony/clock": "^7.4",
-        "symfony/process": "^7.4"
+        "symfony/process": "^7.4",
+        "react/http": "^1.11",
+        "react/socket": "^1.17",
+        "react/event-loop": "^1.6"
     },
     "require-dev": {
         "doctrine/dbal": "^4.0",
