@@ -134,16 +134,44 @@ Start the supervisor in a container (default `http://localhost:9100`):
 APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose up --build
 ```
 
+This starts all services including:
+- **pm**: Process Manager with HTTP server on port 9100 (health + metrics)
+- **prometheus**: Prometheus on port 9090 (scrapes `pm:9100/metrics`)
+- **grafana**: Grafana on port 3000 (with pre-configured Prometheus datasource)
+
+#### Services
+
+| Service | Host Port | Description |
+|---------|-----------|-------------|
+| pm | 9100 | Process Manager health & metrics |
+| prometheus | 9090 | Prometheus metrics database |
+| grafana | 3000 | Grafana visualization UI |
+
 Verify metrics are reachable:
 
 ```bash
 curl http://localhost:9100/metrics
 ```
 
-If port 9100 is already taken on your host, override the published host port:
+Check Prometheus targets are up:
 
 ```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" PM_HOST_PORT=9101 docker compose up --build
+curl http://localhost:9090/api/v1/targets
+```
+
+Access Grafana (no UI datasource setup required):
+
+```bash
+# Default credentials: admin / admin
+open http://localhost:3000
+```
+
+#### Port Overrides
+
+If any ports are already taken on your host, override them:
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" PM_HOST_PORT=9101 PROMETHEUS_HOST_PORT=9091 GRAFANA_HOST_PORT=3001 docker compose up --build
 curl http://localhost:9101/metrics
 ```
 
