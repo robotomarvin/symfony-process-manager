@@ -12,12 +12,10 @@ final class MetricsRegistry
     /** @var array<string, Gauge> */
     private array $gauges = [];
 
-    private readonly PrometheusTextRenderer $renderer;
-
-    public function __construct()
-    {
-        $this->renderer = new PrometheusTextRenderer();
-    }
+    public function __construct(
+        private readonly PrometheusRendererInterface $renderer,
+        private readonly MetricFactoryInterface $metricFactory,
+    ) {}
 
     /**
      * @param array<string, string> $labels
@@ -25,7 +23,7 @@ final class MetricsRegistry
     public function incrementCounter(string $name, string $help = '', array $labels = []): void
     {
         if (!isset($this->counters[$name])) {
-            $this->counters[$name] = new Counter($name, $help);
+            $this->counters[$name] = $this->metricFactory->createCounter($name, $help);
         }
 
         $this->counters[$name]->increment($labels);
@@ -37,7 +35,7 @@ final class MetricsRegistry
     public function setGauge(string $name, float $value, string $help = '', array $labels = []): void
     {
         if (!isset($this->gauges[$name])) {
-            $this->gauges[$name] = new Gauge($name, $help);
+            $this->gauges[$name] = $this->metricFactory->createGauge($name, $help);
         }
 
         $this->gauges[$name]->set($value, $labels);

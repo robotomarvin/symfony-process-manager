@@ -9,6 +9,7 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 use SymfonyProcessManager\Command\ServeCommand;
+use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
 
 final class SymfonyProcessManagerExtension extends Extension
 {
@@ -19,8 +20,10 @@ final class SymfonyProcessManagerExtension extends Extension
 
         $config = $this->processConfiguration(new Configuration(), $configs);
 
+        $container->getDefinition(ProcessManagerLoop::class)
+            ->setArgument('$transportConfigs', $config['transports']);
+
         $container->getDefinition(ServeCommand::class)
-            ->setArgument('$transportConfigs', $config['transports'])
             ->setArgument('$httpHost', $config['http_server']['host'])
             ->setArgument('$httpPort', $config['http_server']['port']);
     }

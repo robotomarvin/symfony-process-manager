@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SymfonyProcessManager\Metrics;
 
-final class PrometheusTextRenderer
+final class PrometheusTextRenderer implements PrometheusRendererInterface
 {
     /**
      * @param array<string, Counter> $counters

@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\Transport;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SymfonyProcessManager\Command\Serve\ConsumeArgs;
-use SymfonyProcessManager\Command\Serve\TransportConfig;
+use SymfonyProcessManager\Transport\ConsumeArgs;
+use SymfonyProcessManager\Transport\TransportConfig;
 
 #[CoversClass(TransportConfig::class)]
 final class TransportConfigTest extends TestCase

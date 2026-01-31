@@ -1,6 +1,7 @@
 vendor
 .phpunit.cache
 .php-cs-fixer.cache
+.claude/
 .beads/artifacts/
 tests/Fixtures/app/var/
 tests/Fixtures/app/config/reference.php

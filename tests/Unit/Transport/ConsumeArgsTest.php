@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\Transport;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SymfonyProcessManager\Command\Serve\ConsumeArgs;
+use SymfonyProcessManager\Transport\ConsumeArgs;
 
 #[CoversClass(ConsumeArgs::class)]
 final class ConsumeArgsTest extends TestCase

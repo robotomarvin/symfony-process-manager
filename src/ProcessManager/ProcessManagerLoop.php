@@ -2,28 +2,100 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Command\Serve;
+namespace SymfonyProcessManager\ProcessManager;
 
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
 use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
+use SymfonyProcessManager\Transport\ConsumeArgs;
+use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
+use SymfonyProcessManager\Output\WorkerOutputHandler;
+use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 final class ProcessManagerLoop
 {
+    /** @var list<TransportConfig> */
+    private readonly array $resolvedTransportConfigs;
+
     /**
-     * @param list<TransportConfig> $transportConfigs
+     * @param array<string, array{
+     *     processes: int,
+     *     failure_limit: int,
+     *     failure_window: int,
+     *     backoff_base: int,
+     *     backoff_max: int,
+     *     poll_interval_ms: int,
+     *     consume_args: array{
+     *         memory_limit: int|null,
+     *         time_limit: int|null,
+     *         limit: int|null,
+     *         sleep: int|null,
+     *         queues: list<string>,
+     *         extra: list<string>,
+     *     },
+     * }> $transportConfigs
      */
     public function __construct(
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
-        private readonly array $transportConfigs,
+        array $transportConfigs,
         private readonly MetricsRegistry $metrics,
-    ) {}
+    ) {
+        $this->resolvedTransportConfigs = self::buildTransportConfigs($transportConfigs);
+    }
+
+    /**
+     * @param array<string, array{
+     *     processes: int,
+     *     failure_limit: int,
+     *     failure_window: int,
+     *     backoff_base: int,
+     *     backoff_max: int,
+     *     poll_interval_ms: int,
+     *     consume_args: array{
+     *         memory_limit: int|null,
+     *         time_limit: int|null,
+     *         limit: int|null,
+     *         sleep: int|null,
+     *         queues: list<string>,
+     *         extra: list<string>,
+     *     },
+     * }> $transports
+     * @return list<TransportConfig>
+     */
+    private static function buildTransportConfigs(array $transports): array
+    {
+        $configs = [];
+
+        foreach ($transports as $name => $transport) {
+            $consumeArgs = $transport['consume_args'];
+
+            $configs[] = TransportConfig::create(
+                transport: $name,
+                processes: $transport['processes'],
+                failureLimit: $transport['failure_limit'],
+                failureWindowSeconds: $transport['failure_window'],
+                backoffBaseSeconds: $transport['backoff_base'],
+                backoffMaxSeconds: $transport['backoff_max'],
+                pollIntervalMs: $transport['poll_interval_ms'],
+                consumeArgs: ConsumeArgs::create(
+                    memoryLimit: $consumeArgs['memory_limit'],
+                    timeLimit: $consumeArgs['time_limit'],
+                    limit: $consumeArgs['limit'],
+                    sleep: $consumeArgs['sleep'],
+                    queues: $consumeArgs['queues'],
+                    extra: $consumeArgs['extra'],
+                ),
+            );
+        }
+
+        return $configs;
+    }
 
     public function run(LoopInterface $loop): int
     {
@@ -35,7 +107,7 @@ final class ProcessManagerLoop
             'workers' => $totalWorkerCount,
             'transports' => array_map(
                 static fn(TransportConfig $config): string => $config->transport,
-                $this->transportConfigs,
+                $this->resolvedTransportConfigs,
             ),
         ]);
 
@@ -106,7 +178,7 @@ final class ProcessManagerLoop
         $workers = [];
         $workerId = 1;
 
-        foreach ($this->transportConfigs as $config) {
+        foreach ($this->resolvedTransportConfigs as $config) {
             for ($i = 0; $i < $config->processes; $i++) {
                 $workers[] = [WorkerState::create($workerId), $config];
                 $workerId++;
@@ -223,7 +295,7 @@ final class ProcessManagerLoop
     {
         $minMs = PHP_INT_MAX;
 
-        foreach ($this->transportConfigs as $config) {
+        foreach ($this->resolvedTransportConfigs as $config) {
             $minMs = min($minMs, $config->pollIntervalMs);
         }
 

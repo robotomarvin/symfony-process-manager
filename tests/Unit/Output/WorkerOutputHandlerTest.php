@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\Output;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
-use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
-use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
+use SymfonyProcessManager\Output\WorkerOutputFormatter;
+use SymfonyProcessManager\Output\WorkerOutputHandler;
 
 #[CoversClass(WorkerOutputHandler::class)]
 final class WorkerOutputHandlerTest extends TestCase

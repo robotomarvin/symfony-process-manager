@@ -6,9 +6,16 @@ services:
     SymfonyProcessManager\Command\ServeCommand:
         tags: ['console.command']
 
-    SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface: '@SymfonyProcessManager\Command\Serve\WorkerProcessFactory'
-    SymfonyProcessManager\Command\Serve\WorkerProcessFactory: ~
-    SymfonyProcessManager\Command\Serve\WorkerOutputFormatter: ~
-    SymfonyProcessManager\Command\Serve\WorkerOutputHandler: ~
-    SymfonyProcessManager\Command\Serve\HttpServer: ~
+    SymfonyProcessManager\Worker\WorkerProcessFactoryInterface: '@SymfonyProcessManager\Worker\WorkerProcessFactory'
+    SymfonyProcessManager\Worker\WorkerProcessFactory: ~
+    SymfonyProcessManager\Output\WorkerOutputFormatter: ~
+    SymfonyProcessManager\Output\WorkerOutputHandler: ~
+    SymfonyProcessManager\Http\HttpServer: ~
+
+    SymfonyProcessManager\Metrics\PrometheusRendererInterface: '@SymfonyProcessManager\Metrics\PrometheusTextRenderer'
+    SymfonyProcessManager\Metrics\PrometheusTextRenderer: ~
+
+    SymfonyProcessManager\Metrics\MetricFactoryInterface: '@SymfonyProcessManager\Metrics\MetricFactory'
+    SymfonyProcessManager\Metrics\MetricFactory: ~
     SymfonyProcessManager\Metrics\MetricsRegistry: ~
+    SymfonyProcessManager\ProcessManager\ProcessManagerLoop: ~

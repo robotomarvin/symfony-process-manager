@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\ProcessManager;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
-use SymfonyProcessManager\Command\Serve\WorkerState;
+use SymfonyProcessManager\ProcessManager\WorkerState;
 
 #[CoversClass(WorkerState::class)]
 final class WorkerStateTest extends TestCase
@@ -27,7 +27,7 @@ final class WorkerStateTest extends TestCase
     {
         $state = WorkerState::create(1);
 
-        self::assertTrue($state->shouldStart(microtime(true)));
+        self::assertTrue($state->shouldStart(1000.0));
     }
 
     public function testShouldStartReturnsFalseWhenProcessExists(): void
@@ -35,7 +35,7 @@ final class WorkerStateTest extends TestCase
         $state = WorkerState::create(1);
         $state->setProcess($this->createMock(Process::class));
 
-        self::assertFalse($state->shouldStart(microtime(true)));
+        self::assertFalse($state->shouldStart(1000.0));
     }
 
     public function testShouldStartReturnsFalseWhenStopped(): void
@@ -43,7 +43,7 @@ final class WorkerStateTest extends TestCase
         $state = WorkerState::create(1);
         $state->markStopped();
 
-        self::assertFalse($state->shouldStart(microtime(true)));
+        self::assertFalse($state->shouldStart(1000.0));
     }
 
     public function testShouldStartReturnsFalseWhenNextStartAtIsInTheFuture(): void
@@ -76,10 +76,10 @@ final class WorkerStateTest extends TestCase
     public function testMarkStoppedPreventsShouldStartFromReturningTrue(): void
     {
         $state = WorkerState::create(1);
-        self::assertTrue($state->shouldStart(microtime(true)));
+        self::assertTrue($state->shouldStart(1000.0));
 
         $state->markStopped();
-        self::assertFalse($state->shouldStart(microtime(true)));
+        self::assertFalse($state->shouldStart(1000.0));
     }
 
     public function testGetProcessAssertsWhenNoProcess(): void

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\ProcessManager;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -12,14 +12,15 @@ use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\Process;
-use SymfonyProcessManager\Command\Serve\ConsumeArgs;
-use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
-use SymfonyProcessManager\Command\Serve\ShutdownState;
-use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
-use SymfonyProcessManager\Command\Serve\WorkerOutputHandler;
-use SymfonyProcessManager\Command\Serve\TransportConfig;
-use SymfonyProcessManager\Command\Serve\WorkerProcessFactoryInterface;
+use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
+use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
+use SymfonyProcessManager\Transport\ConsumeArgs;
+use SymfonyProcessManager\Output\WorkerOutputFormatter;
+use SymfonyProcessManager\Output\WorkerOutputHandler;
+use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
+use SymfonyProcessManager\ProcessManager\ShutdownState;
+use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 #[CoversClass(ProcessManagerLoop::class)]
 final class ProcessManagerLoopTest extends TestCase
@@ -33,7 +34,7 @@ final class ProcessManagerLoopTest extends TestCase
     {
         $this->clock = new AutoAdvancingClock(1704067200.0, 1.0);
         $this->logger = new ArrayLogger();
-        $this->metrics = new MetricsRegistry();
+        $this->metrics = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
 
         $stdout = fopen('php://memory', 'r+');
         self::assertIsResource($stdout);
@@ -60,7 +61,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -86,7 +87,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -113,7 +114,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -136,7 +137,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -158,7 +159,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async', processes: 3)],
+            transportConfigs: self::rawTransportConfigs(processes: 3),
             metrics: $this->metrics,
         );
 
@@ -186,7 +187,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -210,7 +211,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -231,18 +232,19 @@ final class ProcessManagerLoopTest extends TestCase
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
 
-        $consumeArgs = ConsumeArgs::create(
-            memoryLimit: 128,
-            timeLimit: 300,
-            limit: 50,
-        );
-
         $loop = new ProcessManagerLoop(
             $this->clock,
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async', consumeArgs: $consumeArgs)],
+            transportConfigs: self::rawTransportConfigs(consumeArgs: [
+                'memory_limit' => 128,
+                'time_limit' => 300,
+                'limit' => 50,
+                'sleep' => null,
+                'queues' => [],
+                'extra' => [],
+            ]),
             metrics: $this->metrics,
         );
 
@@ -251,7 +253,10 @@ final class ProcessManagerLoopTest extends TestCase
         $calls = $factory->getCreateCalls();
         self::assertNotEmpty($calls);
         self::assertSame('async', $calls[0]['transport']);
-        self::assertSame($consumeArgs, $calls[0]['consumeArgs']);
+        $consumeArgs = $calls[0]['consumeArgs'];
+        self::assertSame(128, $consumeArgs->memoryLimit);
+        self::assertSame(300, $consumeArgs->timeLimit);
+        self::assertSame(50, $consumeArgs->limit);
     }
 
     public function testNullExitCodeTreatedAsFailure(): void
@@ -267,7 +272,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -290,7 +295,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -313,7 +318,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -338,7 +343,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -363,7 +368,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -388,7 +393,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async', pollIntervalMs: 200)],
+            transportConfigs: self::rawTransportConfigs(pollIntervalMs: 200),
             metrics: $this->metrics,
         );
 
@@ -411,7 +416,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -434,7 +439,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -457,7 +462,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -480,7 +485,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -503,7 +508,7 @@ final class ProcessManagerLoopTest extends TestCase
             $this->logger,
             $factory,
             $this->outputHandler,
-            transportConfigs: [TransportConfig::create(transport: 'async')],
+            transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
         );
 
@@ -511,6 +516,60 @@ final class ProcessManagerLoopTest extends TestCase
 
         $output = $this->metrics->toPrometheusText();
         self::assertStringContainsString('process_manager_running', $output);
+    }
+
+    /**
+     * @param array{
+     *     memory_limit: int|null,
+     *     time_limit: int|null,
+     *     limit: int|null,
+     *     sleep: int|null,
+     *     queues: list<string>,
+     *     extra: list<string>,
+     * }|null $consumeArgs
+     * @return array<string, array{
+     *     processes: int,
+     *     failure_limit: int,
+     *     failure_window: int,
+     *     backoff_base: int,
+     *     backoff_max: int,
+     *     poll_interval_ms: int,
+     *     consume_args: array{
+     *         memory_limit: int|null,
+     *         time_limit: int|null,
+     *         limit: int|null,
+     *         sleep: int|null,
+     *         queues: list<string>,
+     *         extra: list<string>,
+     *     },
+     * }>
+     */
+    private static function rawTransportConfigs(
+        string $transport = 'async',
+        int $processes = 1,
+        int $failureLimit = 3,
+        int $failureWindow = 60,
+        int $backoffBase = 1,
+        int $backoffMax = 30,
+        int $pollIntervalMs = 200,
+        ?array $consumeArgs = null,
+    ): array {
+        return [$transport => [
+            'processes' => $processes,
+            'failure_limit' => $failureLimit,
+            'failure_window' => $failureWindow,
+            'backoff_base' => $backoffBase,
+            'backoff_max' => $backoffMax,
+            'poll_interval_ms' => $pollIntervalMs,
+            'consume_args' => $consumeArgs ?? [
+                'memory_limit' => null,
+                'time_limit' => null,
+                'limit' => null,
+                'sleep' => null,
+                'queues' => [],
+                'extra' => [],
+            ],
+        ]];
     }
 
     private function runTicksUntilDone(ProcessManagerLoop $loop, int $maxTicks = 100): int

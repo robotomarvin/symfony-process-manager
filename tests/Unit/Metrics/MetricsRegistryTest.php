@@ -6,7 +6,9 @@ namespace SymfonyProcessManager\Tests\Unit\Metrics;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
+use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 
 #[CoversClass(MetricsRegistry::class)]
 final class MetricsRegistryTest extends TestCase
@@ -15,7 +17,7 @@ final class MetricsRegistryTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->registry = new MetricsRegistry();
+        $this->registry = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
     }
 
     public function testIncrementCounterCreatesAndIncrements(): void

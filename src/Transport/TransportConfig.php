@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Command\Serve;
+namespace SymfonyProcessManager\Transport;
 
 final readonly class TransportConfig
 {

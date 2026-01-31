@@ -1,0 +1,14 @@
+<?php
+
+declare(strict_types=1);
+
+namespace SymfonyProcessManager\Metrics;
+
+interface PrometheusRendererInterface
+{
+    /**
+     * @param array<string, Counter> $counters
+     * @param array<string, Gauge> $gauges
+     */
+    public function render(array $counters, array $gauges): string;
+}

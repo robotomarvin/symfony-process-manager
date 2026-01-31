@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Command\Serve;
+namespace SymfonyProcessManager\Worker;
 
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Transport\ConsumeArgs;
 
 final class WorkerProcessFactory implements WorkerProcessFactoryInterface
 {

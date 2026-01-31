@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Command\Serve;
+namespace SymfonyProcessManager\Tests\Unit\Output;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
+use SymfonyProcessManager\Metrics\MetricFactory;
+use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
+use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 
 #[CoversClass(WorkerOutputFormatter::class)]
 final class WorkerOutputFormatterTest extends TestCase
@@ -145,7 +147,7 @@ final class WorkerOutputFormatterTest extends TestCase
 
     public function testJsonWithHandledSuccessfullyIncrementsCounter(): void
     {
-        $metrics = new MetricsRegistry();
+        $metrics = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
         $formatter = $this->createFormatterWithMetrics($metrics);
         $input = json_encode([
             'message' => 'Received message App\Message\TestMessage was handled successfully (acknowledging to transport).',
@@ -160,7 +162,7 @@ final class WorkerOutputFormatterTest extends TestCase
 
     public function testJsonWithoutHandledSuccessfullyDoesNotIncrementCounter(): void
     {
-        $metrics = new MetricsRegistry();
+        $metrics = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
         $formatter = $this->createFormatterWithMetrics($metrics);
         $input = json_encode([
             'message' => 'Some other log message.',
@@ -175,7 +177,7 @@ final class WorkerOutputFormatterTest extends TestCase
 
     public function testPlainTextDoesNotIncrementCounter(): void
     {
-        $metrics = new MetricsRegistry();
+        $metrics = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
         $formatter = $this->createFormatterWithMetrics($metrics);
         $formatter->format(1, 'was handled successfully (acknowledging to transport).', 'async');
 
