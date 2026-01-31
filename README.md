@@ -126,7 +126,35 @@ composer check
 
 ### Docker Development
 
-The repository includes a dev-focused PHP 8.5 image and a compose file.
+The repository includes a dev-focused PHP 8.5 image and compose files.
+
+Start the supervisor in a container (default `http://localhost:9100`):
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose up --build
+```
+
+Verify metrics are reachable:
+
+```bash
+curl http://localhost:9100/metrics
+```
+
+If port 9100 is already taken on your host, override the published host port:
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" PM_HOST_PORT=9101 docker compose up --build
+curl http://localhost:9101/metrics
+```
+
+Run PHPUnit in the same container image:
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test
+
+# or (explicit)
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test ./vendor/bin/phpunit
+```
 
 Build the image (recommended: match the container user to your host UID/GID):
 

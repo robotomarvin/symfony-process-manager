@@ -1,0 +1,49 @@
+services:
+  pm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    working_dir: /app
+    volumes:
+      - ./:/app:cached
+      - vendor:/app/vendor
+    environment:
+      PM_HTTP_HOST: 0.0.0.0
+      PM_HTTP_PORT: 9100
+    ports:
+      - "${PM_HOST_PORT:-9100}:9100"
+    command:
+      - bash
+      - -lc
+      - |
+          if [ ! -f vendor/autoload.php ]; then
+            composer install
+          fi
+          php tests/Fixtures/app/bin/console messenger:setup-transports --no-interaction
+          php tests/Fixtures/app/bin/console pm:serve
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    working_dir: /app
+    volumes:
+      - ./:/app:cached
+      - vendor:/app/vendor
+    command:
+      - bash
+      - -lc
+      - |
+          if [ ! -f vendor/autoload.php ]; then
+            composer install
+          fi
+          ./vendor/bin/phpunit
+
+volumes:
+  vendor:

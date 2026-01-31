@@ -1,6 +1,11 @@
+parameters:
+    symfony_process_manager_fixture_http_host: '127.0.0.1'
+    symfony_process_manager_fixture_http_port: 0
+
 symfony_process_manager:
     http_server:
-        port: 0
+        host: '%env(default:symfony_process_manager_fixture_http_host:PM_HTTP_HOST)%'
+        port: '%env(int:default:symfony_process_manager_fixture_http_port:PM_HTTP_PORT)%'
     transports:
         async:
             processes: 1
