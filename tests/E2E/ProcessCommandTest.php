@@ -7,6 +7,7 @@ namespace SymfonyProcessManager\Tests\E2E;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Command\Serve\HttpServer;
 use SymfonyProcessManager\Command\Serve\ProcessManagerLoop;
 use SymfonyProcessManager\Command\Serve\ShutdownState;
 use SymfonyProcessManager\Command\Serve\WorkerOutputFormatter;
@@ -18,6 +19,7 @@ use SymfonyProcessManager\Tests\Support\ConsoleProcessRunner;
 use SymfonyProcessManager\Tests\Support\ConsoleProcessSession;
 
 #[CoversClass(ServeCommand::class)]
+#[CoversClass(HttpServer::class)]
 #[CoversClass(ProcessManagerLoop::class)]
 #[CoversClass(ShutdownState::class)]
 #[CoversClass(WorkerOutputFormatter::class)]
@@ -44,6 +46,33 @@ final class ProcessCommandTest extends TestCase
                 5.0,
             );
             self::assertSame(0, $session->waitForExit(5.0));
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testHttpEndpointResponds(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $httpRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'HTTP server listening.',
+                5.0,
+            );
+
+            $address = $httpRecord['context']['address'] ?? null;
+            self::assertIsString($address);
+
+            $address = str_replace('tcp://', '', $address);
+            $url = "http://{$address}/";
+            $response = @file_get_contents($url);
+
+            self::assertIsString($response);
+            $decoded = json_decode($response, true);
+            self::assertIsArray($decoded);
+            self::assertSame('ok', $decoded['status']);
         } finally {
             $this->stopSessionIfRunning($session);
         }

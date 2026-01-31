@@ -30,7 +30,7 @@ final class HttpServer
         $http->listen($socket);
 
         $this->logger->info('HTTP server listening.', [
-            'address' => "{$host}:{$port}",
+            'address' => $socket->getAddress(),
         ]);
     }
 }
