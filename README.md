@@ -78,8 +78,16 @@ Each entry under `transports` configures one `messenger:consume <transport>` poo
 
 ## Usage
 
+In a Symfony application, you typically run:
+
 ```bash
-bin/console pm:serve
+php /path/to/your/app/bin/console pm:serve
+```
+
+In this repository (using the test fixture app), run:
+
+```bash
+php tests/Fixtures/app/bin/console pm:serve
 ```
 
 This starts the HTTP server and begins supervising worker processes.
@@ -114,6 +122,44 @@ composer cs
 composer analyse
 composer test
 composer check
+```
+
+### Docker Development
+
+The repository includes a dev-focused PHP 8.5 image and a compose file.
+
+Build the image (recommended: match the container user to your host UID/GID):
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml build
+```
+
+Install dependencies (writes `./vendor` on your host via the bind-mounted project directory):
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml run --rm app composer install
+```
+
+Start an interactive shell:
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml run --rm app
+```
+
+Optional: keep `vendor/` in a named Docker volume (useful if you do not want `./vendor` on your host, or to avoid slow bind-mount performance on macOS). The image entrypoint ensures the volume is writable by the non-root `app` user.
+
+To enable it, uncomment the `vendor:/app/vendor` line in `docker-compose.dev.yml`.
+
+Run quality gates:
+
+```bash
+composer check
+```
+
+Run the supervisor (ensure the configured HTTP host is reachable from outside the container, e.g. `0.0.0.0`):
+
+```bash
+php tests/Fixtures/app/bin/console pm:serve
 ```
 
 See `CONTRIBUTING.md` for code and testing rules.

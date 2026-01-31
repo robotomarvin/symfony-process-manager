@@ -1,0 +1,10 @@
+.beads/
+.git/
+.idea/
+.phpunit.cache/
+.vscode/
+coverage/
+node_modules/
+vendor/
+var/
+*.log
