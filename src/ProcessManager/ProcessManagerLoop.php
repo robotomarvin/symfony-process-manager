@@ -324,6 +324,12 @@ final class ProcessManagerLoop
     {
         if ($message instanceof PongMessage) {
             $worker->setLastPongAt($now);
+            $this->metrics->setGauge(
+                'worker_last_pong_timestamp',
+                $now,
+                'Timestamp of last pong received from worker',
+                ['worker' => (string) $worker->id],
+            );
             $this->logger->debug('Pong received.', ['worker' => $worker->id]);
         }
     }

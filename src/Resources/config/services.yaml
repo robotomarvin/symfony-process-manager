@@ -11,9 +11,12 @@ services:
     SymfonyProcessManager\Output\WorkerOutputFormatter: ~
     SymfonyProcessManager\Output\WorkerOutputHandler: ~
     SymfonyProcessManager\Ipc\IpcCodec: ~
+    SymfonyProcessManager\Ipc\IpcEndpoint: ~
     SymfonyProcessManager\Ipc\IpcFanout: ~
     SymfonyProcessManager\Ipc\WorkerContextInterface: '@SymfonyProcessManager\Ipc\WorkerContext'
     SymfonyProcessManager\Ipc\WorkerContext: ~
+    SymfonyProcessManager\Worker\WorkerIpcSubscriber:
+        tags: ['kernel.event_subscriber']
     SymfonyProcessManager\Http\HttpServer: ~
 
     SymfonyProcessManager\Metrics\PrometheusRendererInterface: '@SymfonyProcessManager\Metrics\PrometheusTextRenderer'
