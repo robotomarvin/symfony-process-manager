@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace SymfonyProcessManager\ProcessManager;
 
+use Symfony\Component\Process\InputStream;
 use Symfony\Component\Process\Process;
 
 final class WorkerState
 {
+    private ?InputStream $inputStream = null;
+    private ?float $lastPongAt = null;
+
     public function __construct(
         public readonly int $id,
         private ?Process $process,
@@ -111,5 +115,30 @@ final class WorkerState
     public function scheduleRestart(float $now, float $delaySeconds): void
     {
         $this->nextStartAt = $now + $delaySeconds;
+    }
+
+    public function setInputStream(InputStream $stream): void
+    {
+        $this->inputStream = $stream;
+    }
+
+    public function getInputStream(): ?InputStream
+    {
+        return $this->inputStream;
+    }
+
+    public function clearInputStream(): void
+    {
+        $this->inputStream = null;
+    }
+
+    public function setLastPongAt(float $now): void
+    {
+        $this->lastPongAt = $now;
+    }
+
+    public function getLastPongAt(): ?float
+    {
+        return $this->lastPongAt;
     }
 }
