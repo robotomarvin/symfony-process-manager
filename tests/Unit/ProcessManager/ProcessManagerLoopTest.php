@@ -16,7 +16,11 @@ use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 use SymfonyProcessManager\Transport\ConsumeArgs;
+use Psr\Log\NullLogger;
 use SymfonyProcessManager\Ipc\IpcCodec;
+use SymfonyProcessManager\Ipc\IpcFanout;
+use SymfonyProcessManager\Ipc\WorkerContext;
+use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
@@ -30,6 +34,8 @@ final class ProcessManagerLoopTest extends TestCase
     private WorkerOutputHandler $outputHandler;
     private ArrayLogger $logger;
     private MetricsRegistry $metrics;
+    private IpcFanout $ipcFanout;
+    private WorkerContextInterface $workerContext;
 
     protected function setUp(): void
     {
@@ -48,6 +54,8 @@ final class ProcessManagerLoopTest extends TestCase
             $stdout,
             $stderr,
         );
+        $this->ipcFanout = new IpcFanout(new IpcCodec(), new NullLogger());
+        $this->workerContext = new WorkerContext();
     }
 
     public function testSingleWorkerFailureLimitTriggersShutdown(): void
@@ -65,6 +73,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -91,6 +101,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -118,6 +130,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -141,6 +155,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -163,6 +179,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(processes: 3),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -191,6 +209,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -215,6 +235,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -248,6 +270,8 @@ final class ProcessManagerLoopTest extends TestCase
                 'extra' => [],
             ]),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -276,6 +300,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $exitCode = $this->runTicksUntilDone($loop);
@@ -299,6 +325,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -322,6 +350,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -347,6 +377,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -372,6 +404,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $fakeLoop = new FakeLoop();
@@ -397,6 +431,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(pollIntervalMs: 200),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $fakeLoop = new FakeLoop();
@@ -420,6 +456,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -443,6 +481,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -466,6 +506,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -489,6 +531,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);
@@ -512,6 +556,8 @@ final class ProcessManagerLoopTest extends TestCase
             $this->outputHandler,
             transportConfigs: self::rawTransportConfigs(),
             metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
         );
 
         $this->runTicksUntilDone($loop);

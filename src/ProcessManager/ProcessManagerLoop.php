@@ -9,6 +9,13 @@ use React\EventLoop\LoopInterface;
 use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Process\InputStream;
+use SymfonyProcessManager\Ipc\IpcFanout;
+use SymfonyProcessManager\Ipc\IpcMessage;
+use SymfonyProcessManager\Ipc\Message\PingMessage;
+use SymfonyProcessManager\Ipc\Message\PongMessage;
+use SymfonyProcessManager\Ipc\WorkerContextInterface;
+use SymfonyProcessManager\Ipc\WorkerMetadata;
 use SymfonyProcessManager\Transport\ConsumeArgs;
 use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
@@ -19,6 +26,8 @@ final class ProcessManagerLoop
 {
     /** @var list<TransportConfig> */
     private readonly array $resolvedTransportConfigs;
+
+    private int $ticksSinceLastPing = 0;
 
     /**
      * @param array<string, array{
@@ -45,6 +54,9 @@ final class ProcessManagerLoop
         private readonly WorkerOutputHandler $outputHandler,
         array $transportConfigs,
         private readonly MetricsRegistry $metrics,
+        private readonly IpcFanout $ipcFanout,
+        private readonly WorkerContextInterface $workerContext,
+        private readonly int $pingIntervalTicks = 50,
     ) {
         $this->resolvedTransportConfigs = self::buildTransportConfigs($transportConfigs);
     }
@@ -153,11 +165,16 @@ final class ProcessManagerLoop
             }
 
             if ($worker->isRunning()) {
+                $this->dispatchIpcMessages($worker, $config, $now);
                 $this->handleRunningWorker($worker, $shutdownState);
                 continue;
             }
 
             $this->handleWorkerExit($worker, $config, $shutdownState, $now);
+        }
+
+        if (!$shutdownState->isRequested()) {
+            $this->maybeSendPing();
         }
 
         if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
@@ -190,13 +207,21 @@ final class ProcessManagerLoop
 
     private function startWorker(WorkerState $worker, TransportConfig $config): void
     {
-        $worker->setProcess($this->processFactory->create(
+        $process = $this->processFactory->create(
             $config->transport,
             $config->consumeArgs,
-        ));
+        );
+
+        $inputStream = new InputStream();
+        $process->setInput($inputStream);
+
+        $worker->setProcess($process);
+        $worker->setInputStream($inputStream);
+        $this->ipcFanout->register($worker->id, $inputStream);
         $this->outputHandler->registerWorker($worker->id, $config->transport);
+
         $workerId = $worker->id;
-        $worker->getProcess()->start(function (string $type, string $buffer) use ($workerId): void {
+        $process->start(function (string $type, string $buffer) use ($workerId): void {
             $this->outputHandler->handleOutput($workerId, $type, $buffer);
         });
         $worker->markStarted();
@@ -204,7 +229,7 @@ final class ProcessManagerLoop
         $this->logger->info('Worker started.', [
             'worker' => $worker->id,
             'transport' => $config->transport,
-            'pid' => $worker->getProcess()->getPid(),
+            'pid' => $process->getPid(),
         ]);
     }
 
@@ -226,6 +251,9 @@ final class ProcessManagerLoop
         $exitCode = $worker->getProcess()->getExitCode();
         $pid = $worker->getProcess()->getPid();
         $this->outputHandler->flush($worker->id);
+        $this->ipcFanout->unregister($worker->id);
+        $worker->getInputStream()?->close();
+        $worker->clearInputStream();
         $worker->clearProcess();
 
         $exitCode = $exitCode ?? 1;
@@ -275,6 +303,39 @@ final class ProcessManagerLoop
             'delay_seconds' => $delaySeconds,
             'attempt' => $failureCount,
         ]);
+    }
+
+    private function dispatchIpcMessages(WorkerState $worker, TransportConfig $config, float $now): void
+    {
+        $messages = $this->outputHandler->getAndClearIpcMessages($worker->id);
+
+        foreach ($messages as $message) {
+            $this->workerContext->setCurrent(new WorkerMetadata($worker->id, $config->transport));
+
+            try {
+                $this->handleIpcMessage($message, $worker, $now);
+            } finally {
+                $this->workerContext->clear();
+            }
+        }
+    }
+
+    private function handleIpcMessage(IpcMessage $message, WorkerState $worker, float $now): void
+    {
+        if ($message instanceof PongMessage) {
+            $worker->setLastPongAt($now);
+            $this->logger->debug('Pong received.', ['worker' => $worker->id]);
+        }
+    }
+
+    private function maybeSendPing(): void
+    {
+        $this->ticksSinceLastPing++;
+
+        if ($this->ticksSinceLastPing >= $this->pingIntervalTicks) {
+            $this->ticksSinceLastPing = 0;
+            $this->ipcFanout->send(new PingMessage());
+        }
     }
 
     /**
