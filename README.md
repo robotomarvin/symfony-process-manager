@@ -175,14 +175,19 @@ APP_UID="$(id -u)" APP_GID="$(id -g)" PM_HOST_PORT=9101 PROMETHEUS_HOST_PORT=909
 curl http://localhost:9101/metrics
 ```
 
-Run PHPUnit in the same container image:
+Run PHPUnit in the same container image (includes E2E tests):
 
 ```bash
 APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test
-
-# or (explicit)
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test ./vendor/bin/phpunit
 ```
+
+Run the full quality gate in-container:
+
+```bash
+APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test composer check
+```
+
+E2E tests bind the HTTP server to `127.0.0.1` with a random port (`PM_HTTP_PORT=0`) inside the container, so no host port mapping is required. The SQLite database lives at `tests/Fixtures/app/var/test.db`; the test service creates the `var/` directory on startup.
 
 Build the image (recommended: match the container user to your host UID/GID):
 

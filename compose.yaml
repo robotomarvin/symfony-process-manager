@@ -15,6 +15,7 @@ services:
       PM_HTTP_PORT: 9100
     ports:
       - "${PM_HOST_PORT:-9100}:9100"
+    init: true
     command:
       - bash
       - -lc
@@ -23,7 +24,7 @@ services:
             composer install
           fi
           php tests/Fixtures/app/bin/console messenger:setup-transports --no-interaction
-          php tests/Fixtures/app/bin/console pm:serve
+          exec php tests/Fixtures/app/bin/console pm:serve
 
   test:
     build:
@@ -36,6 +37,9 @@ services:
     volumes:
       - ./:/app:cached
       - vendor:/app/vendor
+    environment:
+      PM_HTTP_HOST: 127.0.0.1
+      PM_HTTP_PORT: 0
     command:
       - bash
       - -lc
@@ -43,7 +47,7 @@ services:
           if [ ! -f vendor/autoload.php ]; then
             composer install
           fi
-          ./vendor/bin/phpunit
+          exec ./vendor/bin/phpunit
 
   prometheus:
     image: prom/prometheus:latest

@@ -28,6 +28,8 @@ RUN docker-php-ext-install \
         pdo_sqlite \
         zip
 
+RUN echo 'memory_limit=512M' > /usr/local/etc/php/conf.d/zz-memory-limit.ini
+
 COPY --from=composer /usr/bin/composer /usr/local/bin/composer
 
 RUN set -eux; \

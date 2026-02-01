@@ -11,7 +11,15 @@ if [ "$(id -u)" = "0" ]; then
         fi
     fi
 
-    exec gosu app "$@"
+    exec gosu app "$0" "$@"
+fi
+
+if [ -f /app/composer.json ]; then
+    mkdir -p /app/tests/Fixtures/app/var
+
+    if [ ! -f /app/vendor/autoload.php ]; then
+        composer install
+    fi
 fi
 
 exec "$@"
