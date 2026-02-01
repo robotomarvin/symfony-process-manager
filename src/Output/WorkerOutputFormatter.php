@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SymfonyProcessManager\Output;
 
+use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 final class WorkerOutputFormatter
@@ -14,6 +15,10 @@ final class WorkerOutputFormatter
 
     public function format(int $workerId, string $line, string $transport = ''): string
     {
+        if (IpcCodec::isIpcLine($line)) {
+            return '';
+        }
+
         $decoded = json_decode($line, true);
 
         if (is_array($decoded) && $this->isAssociativeArray($decoded)) {

@@ -7,6 +7,9 @@ namespace SymfonyProcessManager\Tests\Unit\Output;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Ipc\IpcCodec;
+use SymfonyProcessManager\Ipc\Message\PingMessage;
+use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 
@@ -19,6 +22,7 @@ final class WorkerOutputHandlerTest extends TestCase
     /** @var resource */
     private $stderrStream;
 
+    private IpcCodec $ipcCodec;
     private WorkerOutputHandler $handler;
 
     protected function setUp(): void
@@ -31,8 +35,10 @@ final class WorkerOutputHandlerTest extends TestCase
         self::assertIsResource($stderr);
         $this->stderrStream = $stderr;
 
+        $this->ipcCodec = new IpcCodec();
         $this->handler = new WorkerOutputHandler(
             new WorkerOutputFormatter(),
+            $this->ipcCodec,
             $this->stdoutStream,
             $this->stderrStream,
         );
@@ -75,6 +81,83 @@ final class WorkerOutputHandlerTest extends TestCase
 
         $expected = "[worker 1] line one" . PHP_EOL . "[worker 1] line two" . PHP_EOL;
         self::assertSame($expected, $this->readStream($this->stdoutStream));
+    }
+
+    public function testIpcLineIsExtractedAndNotForwardedToStream(): void
+    {
+        $ipcLine = $this->ipcCodec->encode(new PingMessage());
+        $this->handler->handleOutput(1, Process::OUT, $ipcLine . "\n");
+
+        self::assertSame('', $this->readStream($this->stdoutStream));
+    }
+
+    public function testIpcLineIsQueuedAsDecodedMessage(): void
+    {
+        $ipcLine = $this->ipcCodec->encode(new PingMessage());
+        $this->handler->handleOutput(1, Process::OUT, $ipcLine . "\n");
+
+        $messages = $this->handler->getAndClearIpcMessages(1);
+        self::assertCount(1, $messages);
+        self::assertInstanceOf(PingMessage::class, $messages[0]);
+    }
+
+    public function testGetAndClearIpcMessagesClearsQueue(): void
+    {
+        $ipcLine = $this->ipcCodec->encode(new PingMessage());
+        $this->handler->handleOutput(1, Process::OUT, $ipcLine . "\n");
+
+        $this->handler->getAndClearIpcMessages(1);
+        $second = $this->handler->getAndClearIpcMessages(1);
+
+        self::assertSame([], $second);
+    }
+
+    public function testGetAndClearIpcMessagesReturnsEmptyForUnknownWorker(): void
+    {
+        self::assertSame([], $this->handler->getAndClearIpcMessages(999));
+    }
+
+    public function testMixedIpcAndNormalOutputInSingleChunk(): void
+    {
+        $ipcLine = $this->ipcCodec->encode(new ProcessedCommandMessage('handled', 'TestCmd'));
+        $this->handler->handleOutput(1, Process::OUT, "normal log\n" . $ipcLine . "\nanother log\n");
+
+        $expected = "[worker 1] normal log" . PHP_EOL . "[worker 1] another log" . PHP_EOL;
+        self::assertSame($expected, $this->readStream($this->stdoutStream));
+
+        $messages = $this->handler->getAndClearIpcMessages(1);
+        self::assertCount(1, $messages);
+        self::assertInstanceOf(ProcessedCommandMessage::class, $messages[0]);
+    }
+
+    public function testInvalidIpcJsonIsIgnoredAndNotQueued(): void
+    {
+        $this->handler->handleOutput(1, Process::OUT, "@spm:{bad json\n");
+
+        self::assertSame('', $this->readStream($this->stdoutStream));
+        self::assertSame([], $this->handler->getAndClearIpcMessages(1));
+    }
+
+    public function testMultipleIpcMessagesInSingleChunk(): void
+    {
+        $ping = $this->ipcCodec->encode(new PingMessage());
+        $cmd = $this->ipcCodec->encode(new ProcessedCommandMessage('failed', 'Cmd', 'err'));
+        $this->handler->handleOutput(1, Process::OUT, $ping . "\n" . $cmd . "\n");
+
+        $messages = $this->handler->getAndClearIpcMessages(1);
+        self::assertCount(2, $messages);
+        self::assertInstanceOf(PingMessage::class, $messages[0]);
+        self::assertInstanceOf(ProcessedCommandMessage::class, $messages[1]);
+    }
+
+    public function testIpcMessagesFromDifferentWorkersAreIsolated(): void
+    {
+        $ipcLine = $this->ipcCodec->encode(new PingMessage());
+        $this->handler->handleOutput(1, Process::OUT, $ipcLine . "\n");
+        $this->handler->handleOutput(2, Process::OUT, $ipcLine . "\n" . $ipcLine . "\n");
+
+        self::assertCount(1, $this->handler->getAndClearIpcMessages(1));
+        self::assertCount(2, $this->handler->getAndClearIpcMessages(2));
     }
 
     /**

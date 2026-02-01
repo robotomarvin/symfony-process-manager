@@ -16,6 +16,7 @@ use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 use SymfonyProcessManager\Transport\ConsumeArgs;
+use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
@@ -43,6 +44,7 @@ final class ProcessManagerLoopTest extends TestCase
 
         $this->outputHandler = new WorkerOutputHandler(
             new WorkerOutputFormatter($this->metrics),
+            new IpcCodec(),
             $stdout,
             $stderr,
         );

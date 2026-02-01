@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\Output;
 
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\Ipc\IpcCodec;
+use SymfonyProcessManager\Ipc\IpcMessage;
 
 final class WorkerOutputHandler
 {
@@ -15,6 +17,9 @@ final class WorkerOutputHandler
 
     /** @var array<int, string> */
     private array $workerTransports = [];
+
+    /** @var array<int, list<IpcMessage>> */
+    private array $ipcQueues = [];
 
     /** @var resource */
     private mixed $stdoutStream;
@@ -28,6 +33,7 @@ final class WorkerOutputHandler
      */
     public function __construct(
         private readonly WorkerOutputFormatter $formatter,
+        private readonly IpcCodec $ipcCodec,
         mixed $stdoutStream = null,
         mixed $stderrStream = null,
     ) {
@@ -92,8 +98,29 @@ final class WorkerOutputHandler
         }
     }
 
+    /**
+     * @return list<IpcMessage>
+     */
+    public function getAndClearIpcMessages(int $workerId): array
+    {
+        $messages = $this->ipcQueues[$workerId] ?? [];
+        $this->ipcQueues[$workerId] = [];
+
+        return $messages;
+    }
+
     private function forwardLine(int $workerId, string $type, string $line): void
     {
+        if (IpcCodec::isIpcLine($line)) {
+            $message = $this->ipcCodec->decode($line);
+
+            if ($message !== null) {
+                $this->ipcQueues[$workerId][] = $message;
+            }
+
+            return;
+        }
+
         $payload = $this->formatter->format($workerId, $line, $this->workerTransports[$workerId] ?? '');
         $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);

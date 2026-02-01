@@ -10,6 +10,7 @@ services:
     SymfonyProcessManager\Worker\WorkerProcessFactory: ~
     SymfonyProcessManager\Output\WorkerOutputFormatter: ~
     SymfonyProcessManager\Output\WorkerOutputHandler: ~
+    SymfonyProcessManager\Ipc\IpcCodec: ~
     SymfonyProcessManager\Http\HttpServer: ~
 
     SymfonyProcessManager\Metrics\PrometheusRendererInterface: '@SymfonyProcessManager\Metrics\PrometheusTextRenderer'
