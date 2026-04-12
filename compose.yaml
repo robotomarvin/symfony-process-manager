@@ -1,5 +1,6 @@
 services:
   app:
+    image: symfony-process-manager
     build:
       context: .
       dockerfile: Dockerfile
