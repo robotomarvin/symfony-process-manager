@@ -1,6 +1,6 @@
 COMPOSE     = APP_UID=$(shell id -u) APP_GID=$(shell id -g) docker compose
 COMPOSE_MON = $(COMPOSE) --profile monitoring
-RUN         = $(COMPOSE) run --rm
+RUN         = $(COMPOSE) run --rm --remove-orphans
 
 .PHONY: help build up monitoring down shell install test cs cs-fix analyse check
 
@@ -26,16 +26,16 @@ shell: ## Open an interactive shell in the app container
 install: ## Install Composer dependencies into the vendor volume
 	$(RUN) app composer install
 
-test: ## Run PHPUnit (E2E tests bind HTTP to 127.0.0.1:0)
-	$(RUN) -e PM_HTTP_HOST=127.0.0.1 -e PM_HTTP_PORT=0 app ./vendor/bin/phpunit
+test: install ## Run PHPUnit (E2E tests bind HTTP to 127.0.0.1:0)
+	$(RUN) -e PM_HTTP_HOST=127.0.0.1 -e PM_HTTP_PORT=0 app composer test
 
-cs: ## Check coding standards (php-cs-fixer)
-	$(RUN) app ./vendor/bin/php-cs-fixer check
+cs: install ## Check coding standards (php-cs-fixer)
+	$(RUN) app composer cs
 
-cs-fix: ## Auto-fix coding standards
-	$(RUN) app ./vendor/bin/php-cs-fixer fix
+cs-fix: install ## Auto-fix coding standards
+	$(RUN) app composer cs-fix
 
-analyse: ## Run PHPStan static analysis
-	$(RUN) app ./vendor/bin/phpstan analyse
+analyse: install ## Run PHPStan static analysis
+	$(RUN) app composer analyse
 
-check: analyse test ## Run all quality gates (analyse + test)
+check: install analyse test ## Run all quality gates (analyse + test)
