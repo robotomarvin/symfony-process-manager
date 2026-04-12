@@ -24,6 +24,7 @@ shell: ## Open an interactive shell in the app container
 	$(RUN) app bash
 
 install: ## Install Composer dependencies into the vendor volume
+	mkdir -p $(HOME)/.composer/cache
 	$(RUN) app composer install
 
 test: install ## Run PHPUnit (E2E tests bind HTTP to 127.0.0.1:0)
