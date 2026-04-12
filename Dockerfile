@@ -62,7 +62,7 @@ WORKDIR /app
 # Pre-create vendor/ owned by the app user so the named volume is seeded
 # with the correct permissions on first use. Without this, Docker initialises
 # the volume owned by root and composer install fails with a permission error.
-RUN mkdir -p /app/vendor && chown app:app /app/vendor
+RUN mkdir -p /app/vendor && chown "${APP_UID}:${APP_GID}" /app/vendor
 
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 
