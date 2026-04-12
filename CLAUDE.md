@@ -53,18 +53,18 @@ Code conventions and testing rules are in `CONTRIBUTING.md`. Additional context 
 
 ## Issue Tracking (Beads)
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 
 ### Quick Reference
 
 ```bash
 bd ready              # Find available work
-bd create "Title" -p 0 # Create a new issue (P0 example)
+bd create "Title" --type task --priority 2  # Create a new issue
 bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
+bd update <id> --claim  # Claim work (mark in_progress)
 bd close <id>         # Complete work
 bd dep add <child> <parent>  # Mark parent blocked by child
-bd sync               # Sync with git
+bd dolt push          # Push beads to remote
 ```
 
 ### Epics, Tasks, Sub-tasks (Hierarchy)
@@ -99,7 +99,6 @@ Beads supports hierarchical IDs for epics and sub-issues:
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
