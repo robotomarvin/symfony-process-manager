@@ -1,7 +1,8 @@
-COMPOSE = APP_UID=$(shell id -u) APP_GID=$(shell id -g) docker compose
-RUN     = $(COMPOSE) run --rm
+COMPOSE     = APP_UID=$(shell id -u) APP_GID=$(shell id -g) docker compose
+COMPOSE_MON = $(COMPOSE) --profile monitoring
+RUN         = $(COMPOSE) run --rm
 
-.PHONY: help build up down shell install test cs cs-fix analyse check
+.PHONY: help build up monitoring down shell install test cs cs-fix analyse check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -10,11 +11,14 @@ help: ## Show available targets
 build: ## Build the Docker image
 	$(COMPOSE) build
 
-up: ## Start the process manager + monitoring stack (detached)
-	$(COMPOSE) up --build -d app prometheus grafana
+up: ## Start the process manager (detached)
+	$(COMPOSE) up --build -d
+
+monitoring: ## Start the process manager + prometheus + grafana (detached)
+	$(COMPOSE_MON) up --build -d
 
 down: ## Stop and remove all containers
-	$(COMPOSE) down
+	$(COMPOSE_MON) down
 
 shell: ## Open an interactive shell in the app container
 	$(RUN) app bash

@@ -129,26 +129,27 @@ composer check
 The repository ships a PHP 8.5 image and a `Makefile` that wraps all common tasks. `vendor/` is kept in a named Docker volume — no host writes, no macOS bind-mount slowness.
 
 ```bash
-make help       # list all available targets
-make build      # build the Docker image
-make up         # start app + prometheus + grafana (detached)
-make down       # stop all containers
-make shell      # open an interactive shell in the app container
-make install    # run composer install inside the container
+make help        # list all available targets
+make build       # build the Docker image
+make up          # start app only (detached)
+make monitoring  # start app + prometheus + grafana (detached)
+make down        # stop all containers
+make shell       # open an interactive shell in the app container
+make install     # run composer install inside the container
 ```
 
 #### Services
 
-| Service    | Host Port (default) | Description                                   |
-|------------|---------------------|-----------------------------------------------|
-| app        | ephemeral (0)       | Process Manager — health (`/`) + metrics (`/metrics`) |
-| prometheus | ephemeral (0)       | Prometheus — scrapes `app:9100/metrics`       |
-| grafana    | ephemeral (0)       | Grafana — pre-configured Prometheus datasource |
+| Service    | Profile      | Host Port (default) | Description                                   |
+|------------|--------------|---------------------|-----------------------------------------------|
+| app        | _(default)_  | ephemeral (0)       | Process Manager — health (`/`) + metrics (`/metrics`) |
+| prometheus | `monitoring` | ephemeral (0)       | Prometheus — scrapes `app:9100/metrics`       |
+| grafana    | `monitoring` | ephemeral (0)       | Grafana — pre-configured Prometheus datasource |
 
-Ports default to `0` (OS-assigned ephemeral). Fix them when you need stable URLs:
+`prometheus` and `grafana` only start when the `monitoring` profile is active (via `make monitoring`). Ports default to `0` (OS-assigned ephemeral). Fix them when you need stable URLs:
 
 ```bash
-PM_HOST_PORT=9100 PROMETHEUS_HOST_PORT=9090 GRAFANA_HOST_PORT=3000 make up
+PM_HOST_PORT=9100 PROMETHEUS_HOST_PORT=9090 GRAFANA_HOST_PORT=3000 make monitoring
 curl http://localhost:9100/metrics
 # Default Grafana credentials: admin / admin
 open http://localhost:3000
