@@ -16,28 +16,27 @@ The bundle exposes a single console command, `pm:serve`, which:
 ## Component Map
 
 ```
-                        ┌─────────────────────────────────────────┐
-                        │              pm:serve (ServeCommand)     │
-                        │                                         │
-                        │   ┌─────────────┐  ┌────────────────┐  │
-                        │   │  HttpServer │  │ProcessManager  │  │
-                        │   │  (ReactPHP) │  │    Loop        │  │
-                        │   └──────┬──────┘  └───────┬────────┘  │
-                        └──────────┼─────────────────┼───────────┘
-                                   │                 │
-              ┌────────────────────┘       ┌─────────┴──────────┐
-              │                            │                     │
-     GET /metrics              ┌───────────▼───────────┐   SIGTERM
-     GET /                     │     Worker (×N per     │   received
-              │                │     transport)         │
-     ┌────────▼──────┐         │                        │
-     │MetricsRegistry│         │  symfony/process       │
-     │               │         │  (messenger:consume)   │
-     │  Counters[]   │         │                        │
-     │  Gauges[]     │         │  stdout ──►OutputHandler│
-     └───────────────┘         │  stderr ──►OutputHandler│
-                               │  stdin  ◄──IpcFanout   │
-                               └────────────────────────┘
+                    ┌──────────────────────────────────┐
+                    │       pm:serve (ServeCommand)     │
+                    └──────────────┬───────────────────┘
+                                   │
+                   ┌───────────────┴────────────────┐
+                   │                                │
+        ┌──────────▼──────────┐         ┌──────────▼──────────────┐
+        │      HttpServer      │         │   ProcessManagerLoop     │
+        │                     │         │                         │
+        │  GET /  → health    │         │  tick every 200ms       │
+        │  GET /metrics       │         │  spawn / restart workers │
+        └──────────┬──────────┘         │  SIGTERM drain          │
+                   │                   └──────────┬──────────────┘
+        ┌──────────▼──────────┐                   │ spawns ×N per transport
+        │   MetricsRegistry   │         ┌──────────▼─────────────────────┐
+        │                     │         │    Worker (symfony/process)     │
+        │   Counter[]         │◄────────┤    messenger:consume <name>     │
+        │   Gauge[]           │ metrics │                                │
+        └─────────────────────┘ update  │  stdout/stderr → OutputHandler │
+                                        │  stdin         ← IpcFanout     │
+                                        └────────────────────────────────┘
 ```
 
 ### Key Namespaces and Responsibilities

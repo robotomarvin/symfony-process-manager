@@ -9,53 +9,31 @@ Each configured transport with `processes: N` results in N independent `WorkerSt
 ## State Machine
 
 ```
-              ┌───────────────────────────────────┐
-              │              PENDING               │
-              │  (nextStartAt in future or t=0)   │
-              └────────────────┬──────────────────┘
-                               │ shouldStart(now) == true
-                               ▼
-              ┌───────────────────────────────────┐
-              │              STARTING              │
-              │  Process created, started          │
-              └────────────────┬──────────────────┘
-                               │ process started OK
-                               ▼
-              ┌───────────────────────────────────┐
-              │              RUNNING               │
-              │  isRunning() == true               │◄──┐
-              └────────────────┬──────────────────┘   │
-                               │ process exits         │
-                               ▼                       │ restart scheduled
-              ┌───────────────────────────────────┐   │
-              │              EXITED                │   │
-              │  isRunning() == false               │   │
-              └────────────────┬──────────────────┘   │
-                               │                       │
-               ┌───────────────┴──────────────────┐   │
-               │                                  │   │
-               ▼ exit code == 0                   ▼   │ exit code != 0 AND
-     ┌──────────────────────┐       ┌────────────────────────────┐
-     │ clearFailures()      │       │ recordFailure()             │
-     │ scheduleImmediate    │       │ pruneOldFailures()          │
-     │   Restart()          │       │                            │
-     └──────────┬───────────┘       └────────────────────────────┘
-                │                                │
-                │                   ┌────────────┴──────────────┐
-                │                   │                           │
-                │          count > limit                  count <= limit
-                │                   │                           │
-                │                   ▼                           ▼
-                │        ┌───────────────────┐    ┌────────────────────────┐
-                │        │  ShutdownState    │    │  scheduleRestart(now + │
-                │        │  request(         │    │  backoff)              │
-                │        │  FAILURE_LIMIT)   │    └────────────────────────┘
-                │        └───────────────────┘                 │
-                │                                              │
-                └──────────────────────────────────────────────┘
-                                                               │
-                                                               │ shouldStart(now) == true
-                                                               └──────────────────────────►STARTING
+  ┌──────────┐
+  │ PENDING  │◄─────────────────────────────────────────────────┐
+  └────┬─────┘  (nextStartAt reached, or immediate)             │
+       │ shouldStart(now) == true                               │
+       ▼                                                        │
+  ┌──────────┐                                                  │
+  │ RUNNING  │  (process active, IPC in flight)                 │
+  └────┬─────┘                                                  │
+       │ process exits                                          │
+       ▼                                                        │
+  ┌──────────┐                                                  │
+  │  EXITED  │                                                  │
+  └────┬─────┘                                                  │
+       │                                                        │
+       ├── exit code 0 ──► clearFailures()                      │
+       │                   scheduleImmediateRestart() ──────────┘
+       │
+       └── exit code ≠ 0 ──► recordFailure()
+                              pruneOldFailures()
+                                    │
+                       ┌────────────┴────────────┐
+                  count > limit           count ≤ limit
+                       │                         │
+                 ShutdownState            scheduleRestart(now + backoff)
+                 FAILURE_LIMIT                   └────────────────────► PENDING
 ```
 
 ---
