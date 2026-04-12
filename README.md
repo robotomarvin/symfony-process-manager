@@ -126,101 +126,42 @@ composer check
 
 ### Docker Development
 
-The repository includes a dev-focused PHP 8.5 image and compose files.
-
-Start the supervisor in a container (default `http://localhost:9100`):
+The repository ships a PHP 8.5 image and a `Makefile` that wraps all common tasks. `vendor/` is kept in a named Docker volume — no host writes, no macOS bind-mount slowness.
 
 ```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose up --build
+make help       # list all available targets
+make build      # build the Docker image
+make up         # start app + prometheus + grafana (detached)
+make down       # stop all containers
+make shell      # open an interactive shell in the app container
+make install    # run composer install inside the container
 ```
-
-This starts all services including:
-- **pm**: Process Manager with HTTP server on port 9100 (health + metrics)
-- **prometheus**: Prometheus on port 9090 (scrapes `pm:9100/metrics`)
-- **grafana**: Grafana on port 3000 (with pre-configured Prometheus datasource)
 
 #### Services
 
-| Service | Host Port | Description |
-|---------|-----------|-------------|
-| pm | 9100 | Process Manager health & metrics |
-| prometheus | 9090 | Prometheus metrics database |
-| grafana | 3000 | Grafana visualization UI |
+| Service    | Host Port (default) | Description                                   |
+|------------|---------------------|-----------------------------------------------|
+| app        | ephemeral (0)       | Process Manager — health (`/`) + metrics (`/metrics`) |
+| prometheus | ephemeral (0)       | Prometheus — scrapes `app:9100/metrics`       |
+| grafana    | ephemeral (0)       | Grafana — pre-configured Prometheus datasource |
 
-Verify metrics are reachable:
+Ports default to `0` (OS-assigned ephemeral). Fix them when you need stable URLs:
 
 ```bash
+PM_HOST_PORT=9100 PROMETHEUS_HOST_PORT=9090 GRAFANA_HOST_PORT=3000 make up
 curl http://localhost:9100/metrics
-```
-
-Check Prometheus targets are up:
-
-```bash
-curl http://localhost:9090/api/v1/targets
-```
-
-Access Grafana (no UI datasource setup required):
-
-```bash
-# Default credentials: admin / admin
+# Default Grafana credentials: admin / admin
 open http://localhost:3000
 ```
 
-#### Port Overrides
-
-If any ports are already taken on your host, override them:
+#### Running Quality Gates
 
 ```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" PM_HOST_PORT=9101 PROMETHEUS_HOST_PORT=9091 GRAFANA_HOST_PORT=3001 docker compose up --build
-curl http://localhost:9101/metrics
-```
-
-Run PHPUnit in the same container image (includes E2E tests):
-
-```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test
-```
-
-Run the full quality gate in-container:
-
-```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose run --rm test composer check
-```
-
-E2E tests bind the HTTP server to `127.0.0.1` with a random port (`PM_HTTP_PORT=0`) inside the container, so no host port mapping is required. The SQLite database lives at `tests/Fixtures/app/var/test.db`; the test service creates the `var/` directory on startup.
-
-Build the image (recommended: match the container user to your host UID/GID):
-
-```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml build
-```
-
-Install dependencies (writes `./vendor` on your host via the bind-mounted project directory):
-
-```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml run --rm app composer install
-```
-
-Start an interactive shell:
-
-```bash
-APP_UID="$(id -u)" APP_GID="$(id -g)" docker compose -f docker-compose.dev.yml run --rm app
-```
-
-Optional: keep `vendor/` in a named Docker volume (useful if you do not want `./vendor` on your host, or to avoid slow bind-mount performance on macOS). The image entrypoint ensures the volume is writable by the non-root `app` user.
-
-To enable it, uncomment the `vendor:/app/vendor` line in `docker-compose.dev.yml`.
-
-Run quality gates:
-
-```bash
-composer check
-```
-
-Run the supervisor (ensure the configured HTTP host is reachable from outside the container, e.g. `0.0.0.0`):
-
-```bash
-php tests/Fixtures/app/bin/console pm:serve
+make test       # PHPUnit (E2E tests bind HTTP to 127.0.0.1:0 inside the container)
+make cs         # php-cs-fixer check
+make cs-fix     # php-cs-fixer fix
+make analyse    # PHPStan
+make check      # analyse + test
 ```
 
 See `CONTRIBUTING.md` for code and testing rules.

@@ -1,5 +1,5 @@
 services:
-  pm:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,34 +20,8 @@ services:
       - bash
       - -lc
       - |
-          if [ ! -f vendor/autoload.php ]; then
-            composer install
-          fi
           php tests/Fixtures/app/bin/console messenger:setup-transports --no-interaction
           exec php tests/Fixtures/app/bin/console pm:serve
-
-  test:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        APP_UID: ${APP_UID:-1000}
-        APP_GID: ${APP_GID:-1000}
-    working_dir: /app
-    volumes:
-      - ./:/app:cached
-      - vendor:/app/vendor
-    environment:
-      PM_HTTP_HOST: 127.0.0.1
-      PM_HTTP_PORT: 0
-    command:
-      - bash
-      - -lc
-      - |
-          if [ ! -f vendor/autoload.php ]; then
-            composer install
-          fi
-          exec ./vendor/bin/phpunit
 
   prometheus:
     image: prom/prometheus:latest
@@ -59,7 +33,7 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
     depends_on:
-      - pm
+      - app
 
   grafana:
     image: grafana/grafana:latest
