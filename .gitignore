@@ -5,3 +5,8 @@ vendor
 .beads/artifacts/
 tests/Fixtures/app/var/
 tests/Fixtures/app/config/reference.php
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
