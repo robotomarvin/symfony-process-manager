@@ -5,15 +5,10 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\Output;
 
 use SymfonyProcessManager\Ipc\IpcCodec;
-use SymfonyProcessManager\Metrics\MetricsRegistry;
 
 final class WorkerOutputFormatter
 {
-    public function __construct(
-        private readonly ?MetricsRegistry $metrics = null,
-    ) {}
-
-    public function format(int $workerId, string $line, string $transport = ''): string
+    public function format(int $workerId, string $line): string
     {
         if (IpcCodec::isIpcLine($line)) {
             return '';
@@ -22,11 +17,6 @@ final class WorkerOutputFormatter
         $decoded = json_decode($line, true);
 
         if (is_array($decoded) && $this->isAssociativeArray($decoded)) {
-            if ($this->metrics !== null && isset($decoded['message']) && is_string($decoded['message'])
-                && str_contains($decoded['message'], 'was handled successfully (acknowledging to transport).')) {
-                $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $transport]);
-            }
-
             $extra = $decoded['extra'] ?? null;
             $decoded['extra'] = is_array($extra) ? $extra : [];
             $decoded['extra']['worker_id'] = $workerId;

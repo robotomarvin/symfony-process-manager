@@ -19,6 +19,7 @@ use SymfonyProcessManager\Transport\ConsumeArgs;
 use Psr\Log\NullLogger;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcFanout;
+use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
 use SymfonyProcessManager\Ipc\WorkerContext;
 use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
@@ -49,7 +50,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertIsResource($stderr);
 
         $this->outputHandler = new WorkerOutputHandler(
-            new WorkerOutputFormatter($this->metrics),
+            new WorkerOutputFormatter(),
             new IpcCodec(),
             $stdout,
             $stderr,
@@ -564,6 +565,78 @@ final class ProcessManagerLoopTest extends TestCase
 
         $output = $this->metrics->toPrometheusText();
         self::assertStringContainsString('process_manager_running', $output);
+    }
+
+    public function testHandledProcessedCommandMessageIncrementsMessagesCounter(): void
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+        );
+
+        $shutdownState = new ShutdownState();
+        $workers = $loop->initializeWorkers();
+
+        $loop->tick($workers, $shutdownState);
+
+        $codec = new IpcCodec();
+        $encodedLine = $codec->encode(new ProcessedCommandMessage('handled', 'App\Message\TestMessage'));
+        $this->outputHandler->handleOutput(1, Process::OUT, $encodedLine . "\n");
+
+        $loop->tick($workers, $shutdownState);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('messages_processed_total{transport="async"} 1', $output);
+    }
+
+    public function testFailedProcessedCommandMessageDoesNotIncrementMessagesCounter(): void
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+        );
+
+        $shutdownState = new ShutdownState();
+        $workers = $loop->initializeWorkers();
+
+        $loop->tick($workers, $shutdownState);
+
+        $codec = new IpcCodec();
+        $encodedLine = $codec->encode(new ProcessedCommandMessage('failed', 'App\Message\TestMessage', 'Something went wrong'));
+        $this->outputHandler->handleOutput(1, Process::OUT, $encodedLine . "\n");
+
+        $loop->tick($workers, $shutdownState);
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringNotContainsString('messages_processed_total', $output);
     }
 
     /**

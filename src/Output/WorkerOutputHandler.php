@@ -15,9 +15,6 @@ final class WorkerOutputHandler
      */
     private array $buffers = [];
 
-    /** @var array<int, string> */
-    private array $workerTransports = [];
-
     /** @var array<int, list<IpcMessage>> */
     private array $ipcQueues = [];
 
@@ -42,11 +39,6 @@ final class WorkerOutputHandler
 
         assert(\is_resource($this->stdoutStream), 'stdoutStream must be a resource');
         assert(\is_resource($this->stderrStream), 'stderrStream must be a resource');
-    }
-
-    public function registerWorker(int $workerId, string $transport): void
-    {
-        $this->workerTransports[$workerId] = $transport;
     }
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
@@ -121,7 +113,7 @@ final class WorkerOutputHandler
             return;
         }
 
-        $payload = $this->formatter->format($workerId, $line, $this->workerTransports[$workerId] ?? '');
+        $payload = $this->formatter->format($workerId, $line);
         $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);
         fflush($stream);

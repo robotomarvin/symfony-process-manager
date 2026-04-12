@@ -14,6 +14,7 @@ use SymfonyProcessManager\Ipc\IpcFanout;
 use SymfonyProcessManager\Ipc\IpcMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
+use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
 use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Ipc\WorkerMetadata;
 use SymfonyProcessManager\Transport\ConsumeArgs;
@@ -218,7 +219,6 @@ final class ProcessManagerLoop
         $worker->setProcess($process);
         $worker->setInputStream($inputStream);
         $this->ipcFanout->register($worker->id, $inputStream);
-        $this->outputHandler->registerWorker($worker->id, $config->transport);
 
         $workerId = $worker->id;
         $process->start(function (string $type, string $buffer) use ($workerId): void {
@@ -313,14 +313,14 @@ final class ProcessManagerLoop
             $this->workerContext->setCurrent(new WorkerMetadata($worker->id, $config->transport));
 
             try {
-                $this->handleIpcMessage($message, $worker, $now);
+                $this->handleIpcMessage($message, $worker, $config, $now);
             } finally {
                 $this->workerContext->clear();
             }
         }
     }
 
-    private function handleIpcMessage(IpcMessage $message, WorkerState $worker, float $now): void
+    private function handleIpcMessage(IpcMessage $message, WorkerState $worker, TransportConfig $config, float $now): void
     {
         if ($message instanceof PongMessage) {
             $worker->setLastPongAt($now);
@@ -331,6 +331,12 @@ final class ProcessManagerLoop
                 ['worker' => (string) $worker->id],
             );
             $this->logger->debug('Pong received.', ['worker' => $worker->id]);
+
+            return;
+        }
+
+        if ($message instanceof ProcessedCommandMessage && $message->status === 'handled') {
+            $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $config->transport]);
         }
     }
 
