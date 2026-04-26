@@ -221,6 +221,77 @@ final class ProcessCommandTest extends TestCase
         }
     }
 
+    public function testSigtermDrainExitsWithoutSigkillWhenWorkerCooperates(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $this->waitForWorkerStart($session, 5.0);
+
+            $session->signal(SIGTERM);
+
+            $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Sent SIGTERM to worker.',
+                5.0,
+            );
+            self::assertSame(0, $session->waitForExit(5.0));
+
+            foreach ($session->getRecords() as $record) {
+                self::assertNotSame(
+                    'Sent SIGKILL to worker after shutdown timeout.',
+                    $record['message'],
+                    'SIGKILL must not be sent when the worker exits cleanly within shutdown_timeout',
+                );
+            }
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testSigkillEscalatesAfterTimeoutWhenWorkerIgnoresSigterm(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve', assertNoWarnings: false);
+
+        try {
+            $this->waitForWorkerStart($session, 5.0);
+            $this->dispatchFixtureMessages(1, 'sigterm-ignore');
+
+            $this->waitForStdoutJsonLine(
+                $session,
+                static fn(array $record): bool => ($record['message'] ?? null) === 'Fixture sigterm-ignore handler entered.',
+                10.0,
+            );
+
+            $session->signal(SIGTERM);
+
+            $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Sent SIGTERM to worker.',
+                5.0,
+            );
+
+            $sigkillRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Sent SIGKILL to worker after shutdown timeout.',
+                10.0,
+            );
+            self::assertSame('warning', $sigkillRecord['level']);
+            self::assertSame(2, $sigkillRecord['context']['timeout_seconds'] ?? null);
+
+            $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Worker exited.',
+                5.0,
+            );
+            $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Process manager shutting down.',
+                5.0,
+            );
+            self::assertSame(0, $session->waitForExit(5.0));
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     public function testWorkerJsonLogsIncludeWorkerId(): void
     {
         $runner = new ConsoleProcessRunner();
