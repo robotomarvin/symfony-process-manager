@@ -216,6 +216,8 @@ curl http://localhost:9100/metrics
 open http://localhost:3000
 ```
 
+The provisioned **Symfony Process Manager** dashboard ships rows for stats, messages, worker lifecycle, **autoscaler** (target vs current workers, pool utilization, busy/idle stack, scale events, skipped decisions by reason), and worker liveness. See `spec/metrics.md` for the panel-to-metric mapping.
+
 #### Running Quality Gates
 
 ```bash

@@ -249,6 +249,26 @@ Rules:
 
 ---
 
+## Grafana Dashboard
+
+`docker/grafana/provisioning/dashboards/process-manager.json` exposes these metrics in three rows:
+
+- **Stat header** — `process_manager_running`, `messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
+- **Messages** — `messages_processed_total` per transport.
+- **Worker Lifecycle** — `worker_starts_total`, `worker_exits_total` by `exit_code`, `worker_failures_total` + `worker_backoffs_total`.
+- **Autoscaler** —
+  - Stat row: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand` (summed across selected transports).
+  - *Workers per Transport* — stacked `autoscaler_current_workers` with dashed `autoscaler_target_workers` overlay (stepAfter).
+  - *Pool Utilization* — `worker_busy_workers / autoscaler_current_workers`, percentunit, thresholds 0.7 / 0.85 / 0.95.
+  - *Busy vs Idle Workers* — stacked `worker_busy_workers` and `current − busy`.
+  - *Scale Events / min* — rate of `autoscaler_scale_up_total` and `autoscaler_scale_down_total`.
+  - *Skipped Decisions / min by Reason* — stacked rate of `autoscaler_decisions_skipped_total` by `reason`.
+- **Worker Liveness** — `time() − worker_last_pong_timestamp` per worker.
+
+The dashboard relies on the autoscaler emitting `autoscaler_current_workers` for **every** configured transport, including pools using the Fixed strategy — `AutoscalerLoop` evaluates all pools registered through `services.yaml`, so this holds without special-casing.
+
+---
+
 ## Adding New Metrics
 
 Metrics are registered lazily via `MetricsRegistry`:
