@@ -2,7 +2,7 @@
 
 ## Overview
 
-`MetricsRegistry` collects counters and gauges in-process. `PrometheusTextRenderer` formats them in the Prometheus text exposition format, served via `GET /metrics`.
+`MetricsRegistry` collects counters, gauges, and histograms in-process. `PrometheusTextRenderer` formats them in the Prometheus text exposition format, served via `GET /metrics`.
 
 Metrics are incremented/set by the process manager loop and by the worker output formatter.
 
@@ -17,6 +17,10 @@ A monotonically increasing value. Never decreases. Counter names get a `_total` 
 ### Gauge
 
 A value that can increase or decrease. Used for current state or timestamps.
+
+### Histogram
+
+Cumulative bucket counts plus `_sum` and `_count`. Buckets are sorted and deduped on construction; `+Inf` is appended automatically by the renderer. `observe(value, labels)` increments every bucket whose upper bound is `>= value`, accumulates the sum, and increments the count.
 
 ---
 
@@ -139,29 +143,94 @@ Updated in `handleIpcMessage()` when a `PongMessage` is received. Cleared when t
 
 ---
 
-### `messages_processed_total`
-
-**Type:** Counter  
-**Labels:** `transport`  
-**Description:** Total number of Messenger messages successfully processed by workers of the given transport.
-
-```
-# HELP messages_processed_total Total messages processed by workers
-# TYPE messages_processed_total counter
-messages_processed_total{transport="async"} 1427
-```
-
-Incremented by `ProcessManagerLoop::handleIpcMessage()` when it receives a `ProcessedCommandMessage` with `status=handled`.
-
----
-
 ### `worker_busy`
 
 **Type:** Gauge
 **Labels:** `worker`, `transport`
 **Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker process exits — including draining workers, which keep emitting busy/idle transitions through the drain window so operators can observe drain progress per worker.
 
-Set on `WorkerStartedHandlingMessage` (busy) and `ProcessedCommandMessage` (idle).
+Set on `MessengerEventMessage` with `event=received` (busy); cleared on `event=handled` or `event=failed` (idle).
+
+---
+
+## Messenger Message Metrics
+
+All five metrics below are gated by `metrics.messages.enabled` (default `true`). When disabled, the in-worker `WorkerIpcSubscriber` is removed at compile time and the loop short-circuits any `MessengerEventMessage` it might still see — zero runtime cost.
+
+The `message_class` label cardinality is controlled by `metrics.messages.whitelist`:
+
+- Empty whitelist: every FQCN is its own label value.
+- Whitelist set: each entry is either an exact FQCN or a glob (`*` / `?` resolved with `fnmatch(..., FNM_NOESCAPE)`). Misses are bucketed under `message_class="other"`.
+
+### `messenger_messages_processed_total`
+
+**Type:** Counter
+**Labels:** `transport`, `message_class`
+**Description:** Total Messenger messages handled successfully by workers of the given transport.
+
+```
+# HELP messenger_messages_processed_total Total messenger messages handled successfully
+# TYPE messenger_messages_processed_total counter
+messenger_messages_processed_total{message_class="App\\Message\\Foo",transport="async"} 1427
+```
+
+Incremented on `MessengerEventMessage` with `event=handled`.
+
+---
+
+### `messenger_messages_failed_total`
+
+**Type:** Counter
+**Labels:** `transport`, `message_class`
+**Description:** Total Messenger messages that failed handling.
+
+Incremented on `MessengerEventMessage` with `event=failed`. The throwing exception's class is carried in the IPC payload (`errorClass`) but is not currently exposed as a label — keep `message_class` cardinality predictable.
+
+---
+
+### `messenger_messages_retried_total`
+
+**Type:** Counter
+**Labels:** `transport`, `message_class`
+**Description:** Total Messenger messages scheduled for retry.
+
+Incremented on `MessengerEventMessage` with `event=retried`. Retries do not affect the in-flight gauge: the receive→retried transition reuses the original received slot.
+
+---
+
+### `messenger_message_duration_seconds`
+
+**Type:** Histogram
+**Labels:** `transport`, `message_class`
+**Description:** End-to-end handling duration in seconds, observed on both `handled` and `failed` events.
+
+Default buckets: `[0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60]`. Override via `metrics.messages.duration_buckets`. Buckets are sorted and deduped on load; `+Inf` is appended automatically by the renderer.
+
+```
+# HELP messenger_message_duration_seconds Messenger message handling duration in seconds
+# TYPE messenger_message_duration_seconds histogram
+messenger_message_duration_seconds_bucket{message_class="App\\Message\\Foo",transport="async",le="0.01"} 0
+messenger_message_duration_seconds_bucket{message_class="App\\Message\\Foo",transport="async",le="0.05"} 1
+messenger_message_duration_seconds_bucket{message_class="App\\Message\\Foo",transport="async",le="+Inf"} 1
+messenger_message_duration_seconds_sum{message_class="App\\Message\\Foo",transport="async"} 0.0250
+messenger_message_duration_seconds_count{message_class="App\\Message\\Foo",transport="async"} 1
+```
+
+Timing is captured in `WorkerIpcSubscriber`: a clock reading on `WorkerMessageReceivedEvent` is keyed by `spl_object_id($envelope->getMessage())` and popped on `WorkerMessageHandledEvent` / `WorkerMessageFailedEvent`. The map has a 1024-entry FIFO eviction cap to bound growth if a `received` is never paired (e.g. crash before handle/fail). Duration is `null` in that case and the histogram is not observed.
+
+---
+
+### `messenger_messages_in_flight`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Messages currently in flight per transport. Incremented on `received`, decremented on `handled` / `failed`. Floored at 0 to tolerate decrement-without-prior-increment.
+
+```
+# HELP messenger_messages_in_flight Messenger messages currently in flight per transport
+# TYPE messenger_messages_in_flight gauge
+messenger_messages_in_flight{transport="async"} 3
+```
 
 ---
 
@@ -227,14 +296,15 @@ The renderer (`PrometheusTextRenderer`) generates output per the [Prometheus tex
 
 ```
 # HELP <name> <help text>
-# TYPE <name> <counter|gauge>
+# TYPE <name> <counter|gauge|histogram>
 <name>[{<label_name>="<label_value>"[,...]}] <value>
 ```
 
 Rules:
 - Counter metric names get `_total` appended.
+- Histograms emit `<name>_bucket{le="..."}` (one per bound, plus `le="+Inf"`), `<name>_sum`, and `<name>_count` lines. Bucket counts are cumulative.
 - Label values are escaped: backslashes become `\\`, double-quotes become `\"`, newlines become `\n`.
-- Float values with no decimal point get `.0` appended (e.g., `1` → `1.0`).
+- Float values with no decimal point get `.0` appended (e.g., `1` → `1.0`). Histogram bucket bounds are rendered as plain decimals (no scientific notation, no trailing zeros), and integer-valued bounds are rendered without a decimal point (e.g. `1`, `60`) for round-trip compatibility with Prometheus tooling.
 - Metrics with no recorded values still emit HELP and TYPE lines with no data lines.
 
 ---
@@ -246,6 +316,9 @@ Rules:
 | `transport` | Transport name as configured (e.g., `async`) | Set at worker start; persists for the process lifetime |
 | `exit_code` | String integer (e.g., `"0"`, `"1"`, `"143"`) | SIGTERM exit is typically 143 (128+15) |
 | `worker` | String integer worker ID (e.g., `"0"`, `"1"`) | IDs are 0-based, scoped per transport |
+| `message_class` | Message FQCN, or `"other"` when whitelist is set and FQCN matches no entry | Cardinality controlled by `metrics.messages.whitelist` |
+| `le` | Histogram bucket upper bound, or `+Inf` | Internal label emitted only on `<name>_bucket` lines |
+| `reason` | Autoscaler skip reason | See `autoscaler_decisions_skipped_total` |
 
 ---
 
@@ -253,8 +326,8 @@ Rules:
 
 `docker/grafana/provisioning/dashboards/process-manager.json` exposes these metrics in three rows:
 
-- **Stat header** — `process_manager_running`, `messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
-- **Messages** — `messages_processed_total` per transport.
+- **Stat header** — `process_manager_running`, `messenger_messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
+- **Messages** — `messenger_messages_processed_total`, `messenger_messages_failed_total`, `messenger_messages_retried_total`, `messenger_messages_in_flight`, and `messenger_message_duration_seconds` quantiles per transport.
 - **Worker Lifecycle** — `worker_starts_total`, `worker_exits_total` by `exit_code`, `worker_failures_total` + `worker_backoffs_total`.
 - **Autoscaler** —
   - Stat row: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand` (summed across selected transports).
@@ -288,6 +361,26 @@ $this->metrics->setGauge(
     'Help text',
     ['label_key' => 'label_value'],
 );
+
+// Observe a histogram (buckets are used only on first observation)
+$this->metrics->observeHistogram(
+    'my_histogram_name',
+    $valueSeconds,
+    'Help text',
+    [0.01, 0.05, 0.1, 0.5, 1.0],
+    ['label_key' => 'label_value'],
+);
 ```
 
-Metric names must be unique across counters and gauges. There is no collision check at the registry level; duplicate names of the same type will share the same metric object.
+Metric names must be unique across counters, gauges, and histograms. There is no collision check at the registry level; duplicate names of the same type will share the same metric object.
+
+### IPC events from workers
+
+Worker → manager events flow through `MessengerEventMessage` (one IPC envelope, four event types):
+
+- `received` — `WorkerMessageReceivedEvent`; `durationSeconds=null`, `errorClass=null`. Carries the message FQCN and `getReceiverName()` as `transport`.
+- `handled` — `WorkerMessageHandledEvent`; `durationSeconds` filled when paired with a prior `received`.
+- `failed` — `WorkerMessageFailedEvent`; `durationSeconds` filled when paired, `errorClass` is `$throwable::class`.
+- `retried` — `WorkerMessageRetriedEvent`; no duration, no error class.
+
+To add a new in-worker signal, prefer extending `MessengerEventMessage` with optional fields over introducing a new IPC envelope, so the existing IPC pipeline (codec allow-list, output handler, fanout) carries it for free.
