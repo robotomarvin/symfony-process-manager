@@ -175,32 +175,31 @@ final class WorkerPool
         $applied = false;
         $skipReason = null;
 
-        if ($stepped > $previous) {
-            if (($now - $this->lastScaledUpAt) < $auto->scaleUpCooldownSec && $this->lastScaledUpAt > 0.0) {
-                $skipReason = 'cooldown_up';
-            } elseif ($previous >= $auto->max) {
+        // Branch on the *raw* direction so boundary saturation (at_max/at_min)
+        // is reported even when clamp + step cap collapse $stepped to $previous.
+        if ($rawDesired > $previous) {
+            if ($previous >= $auto->max) {
                 $skipReason = 'at_max';
+            } elseif (($now - $this->lastScaledUpAt) < $auto->scaleUpCooldownSec && $this->lastScaledUpAt > 0.0) {
+                $skipReason = 'cooldown_up';
+            } elseif ($stepped === $previous) {
+                $skipReason = 'step_cap';
             } else {
                 $this->target = $stepped;
                 $this->lastScaledUpAt = $now;
                 $applied = true;
             }
-        } elseif ($stepped < $previous) {
-            if (($now - $this->lastScaledDownAt) < $auto->scaleDownCooldownSec && $this->lastScaledDownAt > 0.0) {
-                $skipReason = 'cooldown_down';
-            } elseif ($previous <= $auto->min) {
+        } elseif ($rawDesired < $previous) {
+            if ($previous <= $auto->min) {
                 $skipReason = 'at_min';
+            } elseif (($now - $this->lastScaledDownAt) < $auto->scaleDownCooldownSec && $this->lastScaledDownAt > 0.0) {
+                $skipReason = 'cooldown_down';
+            } elseif ($stepped === $previous) {
+                $skipReason = 'step_cap';
             } else {
                 $this->target = $stepped;
                 $this->lastScaledDownAt = $now;
                 $applied = true;
-            }
-        } else {
-            // No change; could be due to step cap if raw direction differed
-            if ($rawDesired > $previous && $stepped === $previous) {
-                $skipReason = 'step_cap';
-            } elseif ($rawDesired < $previous && $stepped === $previous) {
-                $skipReason = 'step_cap';
             }
         }
 

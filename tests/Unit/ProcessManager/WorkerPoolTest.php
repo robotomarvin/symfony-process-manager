@@ -103,6 +103,33 @@ final class WorkerPoolTest extends TestCase
         self::assertSame(5, $allowed['target']);
     }
 
+    public function testSetTargetReturnsAtMaxWhenAlreadyAtMax(): void
+    {
+        $pool = $this->buildPool(min: 1, max: 3, scaleUpStep: 10, scaleDownStep: 10, scaleUpCooldownSec: 0);
+
+        // Bring the pool to its max.
+        $pool->setTarget(3, 100.0);
+        self::assertSame(3, $pool->getTarget());
+
+        // Any request above max from the boundary must be reported as at_max,
+        // not step_cap, even though stepped collapses to previous.
+        $skipped = $pool->setTarget(10, 200.0);
+        self::assertSame('at_max', $skipped['skip_reason']);
+        self::assertFalse($skipped['applied']);
+        self::assertSame(3, $skipped['target']);
+    }
+
+    public function testSetTargetReturnsAtMinWhenAlreadyAtMin(): void
+    {
+        $pool = $this->buildPool(min: 2, max: 10, scaleDownStep: 10, scaleDownCooldownSec: 0);
+
+        // Pool starts at min=2. Asking for less must surface at_min, not step_cap.
+        $skipped = $pool->setTarget(0, 100.0);
+        self::assertSame('at_min', $skipped['skip_reason']);
+        self::assertFalse($skipped['applied']);
+        self::assertSame(2, $skipped['target']);
+    }
+
     public function testReconcileCreatesAdditionalWorkersOnScaleUp(): void
     {
         $pool = $this->buildPool(min: 1, max: 10, scaleUpStep: 100, scaleDownStep: 1);
