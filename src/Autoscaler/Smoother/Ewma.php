@@ -21,7 +21,6 @@ final class Ewma
         }
 
         if ($deltaSeconds <= 0.0) {
-            $this->value = $sample;
             return;
         }
 

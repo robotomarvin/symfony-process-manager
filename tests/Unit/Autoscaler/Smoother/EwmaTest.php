@@ -19,13 +19,13 @@ final class EwmaTest extends TestCase
         self::assertSame(5.0, $ewma->value());
     }
 
-    public function testZeroDeltaResetsToSample(): void
+    public function testZeroDeltaHoldsPriorValue(): void
     {
         $ewma = new Ewma(timeConstantSeconds: 30.0);
         $ewma->update(1.0, 1.0);
         $ewma->update(0.0, 10.0);
 
-        self::assertSame(10.0, $ewma->value());
+        self::assertSame(1.0, $ewma->value());
     }
 
     public function testValueDecaysExponentiallyOverTime(): void
