@@ -9,8 +9,8 @@ final readonly class PoolSnapshot
     public function __construct(
         public string $transport,
         public int $currentWorkers,
-        public int $busyWorkers,
-        public int $idleWorkers,
+        public float $busyWorkers,
+        public float $idleWorkers,
         public float $throughputPerSecond,
         public ?int $queueDepth,
         public int $min,

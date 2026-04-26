@@ -44,13 +44,35 @@ final class UtilizationStrategyTest extends TestCase
         self::assertSame(10, $tight->decide($this->snapshot(busy: 10)));
     }
 
-    private function snapshot(int $busy): PoolSnapshot
+    public function testFractionalBusyDoesNotOvershoot(): void
+    {
+        // Bursty traffic: a single worker is busy ~half the time, so the
+        // EWMA settles around 0.5. A correct strategy should NOT see this
+        // as "1 fully busy worker" and demand 2 — that would cause flapping.
+        $strategy = new UtilizationStrategy(target: 0.5);
+
+        // 0.5 / 0.5 = 1.0 → ceil = 1
+        self::assertSame(1, $strategy->decide($this->snapshotAt(current: 5, busy: 0.5)));
+        // 0.4 / 0.5 = 0.8 → ceil = 1
+        self::assertSame(1, $strategy->decide($this->snapshotAt(current: 5, busy: 0.4)));
+        // 0.6 / 0.5 = 1.2 → ceil = 2 (legit: workers genuinely overloaded)
+        self::assertSame(2, $strategy->decide($this->snapshotAt(current: 1, busy: 0.6)));
+    }
+
+    private function snapshot(float $busy): PoolSnapshot
+    {
+        // Existing tests assume busy >> currentWorkers (saturated regime),
+        // which keeps `util` above the scale-up threshold.
+        return $this->snapshotAt(current: 5, busy: $busy);
+    }
+
+    private function snapshotAt(int $current, float $busy): PoolSnapshot
     {
         return new PoolSnapshot(
             transport: 'async',
-            currentWorkers: 5,
+            currentWorkers: $current,
             busyWorkers: $busy,
-            idleWorkers: max(0, 5 - $busy),
+            idleWorkers: max(0.0, $current - $busy),
             throughputPerSecond: 0.0,
             queueDepth: null,
             min: 1,

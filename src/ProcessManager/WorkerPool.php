@@ -118,14 +118,14 @@ final class WorkerPool
         $this->throughputEwma->update($deltaSeconds, $throughput);
     }
 
-    public function smoothedBusy(): int
+    public function smoothedBusy(): float
     {
-        return (int) round($this->busyEwma->value());
+        return $this->busyEwma->value();
     }
 
-    public function smoothedIdle(): int
+    public function smoothedIdle(): float
     {
-        return (int) round($this->idleEwma->value());
+        return $this->idleEwma->value();
     }
 
     public function smoothedThroughput(): float
