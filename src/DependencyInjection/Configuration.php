@@ -7,6 +7,7 @@ namespace SymfonyProcessManager\DependencyInjection;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 
 final class Configuration implements ConfigurationInterface
 {
@@ -146,7 +147,27 @@ final class Configuration implements ConfigurationInterface
 
                     return $sum > $v['total_cap'];
                 })
-                ->thenInvalid('total_cap is too low to satisfy the sum of pool minimums (autoscaled minima plus fixed processes).')
+                ->then(static function (array $v): never {
+                    $contributions = [];
+                    $sum = 0;
+                    foreach ($v['transports'] as $name => $transport) {
+                        if (isset($transport['autoscaler'])) {
+                            $contribution = $transport['autoscaler']['min'];
+                            $contributions[] = sprintf('%s min=%d', $name, $contribution);
+                        } else {
+                            $contribution = $transport['processes'] ?? 1;
+                            $contributions[] = sprintf('%s processes=%d', $name, $contribution);
+                        }
+                        $sum += $contribution;
+                    }
+
+                    throw new InvalidConfigurationException(sprintf(
+                        'total_cap (%d) is below the sum of pool minimums (%d): %s.',
+                        $v['total_cap'],
+                        $sum,
+                        implode(', ', $contributions),
+                    ));
+                })
             ->end()
         ;
 

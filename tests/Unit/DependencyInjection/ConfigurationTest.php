@@ -322,6 +322,7 @@ final class ConfigurationTest extends TestCase
     public function testTotalCapBelowMinSumIsInvalid(): void
     {
         $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('total_cap (3) is below the sum of pool minimums (4): a min=2, b min=2.');
 
         $this->process([
             'total_cap' => 3,
@@ -347,6 +348,7 @@ final class ConfigurationTest extends TestCase
     public function testTotalCapAccountsForFixedProcesses(): void
     {
         $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('total_cap (3) is below the sum of pool minimums (4): fixed processes=2, auto min=2.');
 
         $this->process([
             'total_cap' => 3,
