@@ -163,8 +163,8 @@ Process manager:
 - `worker_backoffs_total{transport=...}` (counter)
 - `worker_sigkills_total` (counter)
 - `messages_processed_total{transport=...}` (counter)
-- `worker_last_pong_timestamp{worker=...}` (gauge) — cleared when worker enters drain
-- `worker_busy{worker=...,transport=...}` (gauge, 0/1)
+- `worker_last_pong_timestamp{worker=...}` (gauge) — cleared on worker exit
+- `worker_busy{worker=...,transport=...}` (gauge, 0/1) — cleared on worker exit
 
 Autoscaler:
 

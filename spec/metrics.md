@@ -135,7 +135,7 @@ worker_last_pong_timestamp{worker="1"} 1744459200.456
 
 The label value is the string representation of the worker's integer ID.
 
-Updated in `handleIpcMessage()` when a `PongMessage` is received.
+Updated in `handleIpcMessage()` when a `PongMessage` is received. Cleared when the worker process exits.
 
 ---
 
@@ -159,7 +159,7 @@ Incremented by `ProcessManagerLoop::handleIpcMessage()` when it receives a `Proc
 
 **Type:** Gauge
 **Labels:** `worker`, `transport`
-**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker enters draining or exits.
+**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker process exits — including draining workers, which keep emitting busy/idle transitions through the drain window so operators can observe drain progress per worker.
 
 Set on `WorkerStartedHandlingMessage` (busy) and `ProcessedCommandMessage` (idle).
 
@@ -169,7 +169,7 @@ Set on `WorkerStartedHandlingMessage` (busy) and `ProcessedCommandMessage` (idle
 
 **Type:** Gauge
 **Labels:** `transport`
-**Description:** Count of currently-busy workers per pool, set by the autoscaler on each evaluation.
+**Description:** Count of currently-busy workers per pool, set by the autoscaler on each evaluation. Includes draining workers still finishing their last message — a worker handling a message is busy regardless of whether it is being torn down. Distinct from the strategy-snapshot view (`autoscaler_current_workers`), which excludes draining workers because they are not future capacity.
 
 ---
 

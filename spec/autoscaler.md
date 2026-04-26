@@ -111,8 +111,11 @@ Manager state machine:
 
 - **How**: SIGTERM only. Reuses `shutdown_timeout` and `worker_sigkills_total` from the manager-shutdown path. Same SIGKILL escalation applies if a draining worker won't exit.
 - **Which worker**: idle first (using busy/idle state from reactive IPC), then highest worker id as a fallback.
-- **Counting**: draining workers are excluded from `currentWorkers`, `busyWorkers`, and `idleWorkers` in the snapshot. They're tracked separately for lifecycle management only.
-- **Worker liveness gauge**: when a worker enters draining, its `worker_last_pong_timestamp` and `worker_busy` entries are cleared from the registry, keeping liveness monitoring uncluttered by intentionally-going-away workers.
+- **Counting (strategy snapshot)**: draining workers are excluded from `currentWorkers`, `busyWorkers`, and `idleWorkers` in the snapshot fed to scaling strategies. They are not future capacity — including them would let a hung drain block scale-up under load.
+- **Counting (observability metrics)**: by contrast, the `worker_busy_workers` gauge counts busy workers across the entire pool, including any draining worker still finishing its last message. A worker handling a message is busy regardless of whether it is being torn down. The split keeps two coherent views:
+  - `autoscaler_*` gauges = strategy view (excludes draining)
+  - `worker_*` gauges = ground-truth view (includes draining until exit)
+- **Worker liveness gauges**: `worker_last_pong_timestamp` and `worker_busy` entries are cleared from the registry when the worker process exits (not on entry to draining). Keeping them set during the drain window preserves per-worker visibility into drain progress — operators can see which workers are still busy with a final message and which have already finished.
 
 ## Validation
 

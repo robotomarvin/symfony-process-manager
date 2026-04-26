@@ -214,6 +214,25 @@ final class WorkerPoolTest extends TestCase
         self::assertCount(3, $pool->drainingWorkers());
     }
 
+    public function testBusyWorkerCountIncludesDrainingButActiveBusyDoesNot(): void
+    {
+        $pool = $this->buildPool(min: 3, max: 5);
+
+        foreach ($pool->workers() as $worker) {
+            $worker->markBusy();
+        }
+
+        self::assertSame(3, $pool->busyWorkerCount());
+        self::assertSame(3, $pool->activeBusyWorkerCount());
+
+        $pool->drainAll();
+
+        // Workers stayed busy while draining (still finishing their last message).
+        self::assertSame(3, $pool->busyWorkerCount(), 'busyWorkerCount() includes draining-busy workers');
+        self::assertSame(0, $pool->activeBusyWorkerCount(), 'activeBusyWorkerCount() excludes draining workers (strategy input)');
+        self::assertSame(0, $pool->idleWorkerCount(), 'idleWorkerCount() reflects active pool only');
+    }
+
     private function buildPool(
         int $min,
         int $max,

@@ -73,7 +73,35 @@ final class WorkerPool
         return count($this->workers);
     }
 
+    /**
+     * Count of busy workers across the entire pool, including workers
+     * currently draining but still finishing their last message. This is
+     * the "ground truth" view used for observability — a draining worker
+     * mid-message is genuinely busy.
+     */
     public function busyWorkerCount(): int
+    {
+        $count = 0;
+        foreach ($this->workers as $worker) {
+            if ($worker->isBusy()) {
+                $count++;
+            }
+        }
+        foreach ($this->draining as $worker) {
+            if ($worker->isBusy()) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * Count of busy workers in the active pool only. Used as input to the
+     * autoscaler strategy snapshot, where draining workers must be excluded
+     * (they are not future capacity).
+     */
+    public function activeBusyWorkerCount(): int
     {
         $count = 0;
         foreach ($this->workers as $worker) {
@@ -87,7 +115,7 @@ final class WorkerPool
 
     public function idleWorkerCount(): int
     {
-        return $this->activeWorkerCount() - $this->busyWorkerCount();
+        return $this->activeWorkerCount() - $this->activeBusyWorkerCount();
     }
 
     public function getTarget(): int
@@ -108,7 +136,7 @@ final class WorkerPool
         $deltaSeconds = $this->lastSampleAt === null ? 0.0 : max(0.0, $now - $this->lastSampleAt);
         $this->lastSampleAt = $now;
 
-        $busy = (float) $this->busyWorkerCount();
+        $busy = (float) $this->activeBusyWorkerCount();
         $idle = (float) $this->idleWorkerCount();
         $throughput = $deltaSeconds > 0.0 ? ($this->messagesProcessedSinceLastSample / $deltaSeconds) : 0.0;
         $this->messagesProcessedSinceLastSample = 0;
