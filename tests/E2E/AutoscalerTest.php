@@ -244,6 +244,62 @@ final class AutoscalerTest extends TestCase
         }
     }
 
+    public function testTotalCapClampsScalablePoolBelowAutoscalerDemand(): void
+    {
+        // Combined fixture pools: async (fixed, processes=1) + scalable (autoscaler min=1, max=3).
+        // The "test_capped" env overlay sets total_cap=2, which leaves 1 worker above min for the
+        // higher-priority fixed pool's siblings — scalable can never grow past min=1 even when
+        // its strategy demands more.
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve', env: ['APP_ENV' => 'test_capped']);
+
+        try {
+            $address = $this->waitForHttpAddress($session);
+
+            $session->waitForRecord(
+                static fn(array $r): bool => $r['message'] === 'Worker started.'
+                    && ($r['context']['transport'] ?? null) === 'scalable',
+                5.0,
+            );
+
+            // Sustained load so the strategy decides desired >= 2.
+            $this->dispatchScalableMessages(count: 6, sleep: 1.5);
+
+            // Wait until the arbiter records unmet demand for the scalable pool.
+            $start = microtime(true);
+            $body = '';
+            $matched = false;
+            while ((microtime(true) - $start) < 20.0) {
+                $body = $this->fetchMetrics($address);
+                if (preg_match('/autoscaler_unmet_demand\{transport="scalable"\} ([1-9])/', $body) === 1) {
+                    $matched = true;
+                    break;
+                }
+                usleep(250000);
+            }
+            self::assertTrue(
+                $matched,
+                'Expected autoscaler_unmet_demand{transport="scalable"} >= 1 under capped load. Metrics: ' . $body,
+            );
+
+            // Scalable pool target must remain at min=1 because the cap leaves no room above min.
+            self::assertMatchesRegularExpression(
+                '/autoscaler_target_workers\{transport="scalable"\} 1\b/',
+                $body,
+            );
+
+            // No "Worker started." event should ever land for a second scalable worker.
+            $startedScalable = array_filter(
+                $session->getRecords(),
+                static fn(array $r): bool => $r['message'] === 'Worker started.'
+                    && ($r['context']['transport'] ?? null) === 'scalable',
+            );
+            self::assertCount(1, $startedScalable, 'Cap must prevent a second scalable worker from spawning.');
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     public function testFixedTransportDoesNotScale(): void
     {
         $runner = new ConsoleProcessRunner();

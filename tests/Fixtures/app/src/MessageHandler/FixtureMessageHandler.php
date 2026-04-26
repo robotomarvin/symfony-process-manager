@@ -41,6 +41,17 @@ final class FixtureMessageHandler
             return;
         }
 
+        if (str_starts_with($message->payload, 'sleep:')) {
+            $seconds = (float) substr($message->payload, strlen('sleep:'));
+            $this->logger->info('Fixture sleep handler entered.', ['seconds' => $seconds]);
+            usleep((int) round($seconds * 1_000_000));
+            $this->logger->info('Fixture message handled.', [
+                'payload' => $message->payload,
+            ]);
+
+            return;
+        }
+
         $this->logger->info('Fixture message handled.', [
             'payload' => $message->payload,
         ]);

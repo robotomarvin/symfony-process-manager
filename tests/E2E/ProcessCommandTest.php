@@ -382,6 +382,186 @@ final class ProcessCommandTest extends TestCase
         }
     }
 
+    public function testUnexpectedExitBackoffIsExponential(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve', assertNoWarnings: false);
+
+        try {
+            $startRecord = $this->waitForWorkerStart($session, 5.0);
+            $pid = $startRecord['context']['pid'] ?? null;
+            self::assertIsInt($pid);
+
+            $delays = [];
+
+            for ($attempt = 1; $attempt <= 3; $attempt += 1) {
+                $this->signalPid($pid, SIGKILL);
+
+                $session->waitForRecord(
+                    static fn(array $record): bool => $record['message'] === 'Worker exited.'
+                        && ($record['context']['exit_code'] ?? 0) !== 0,
+                    5.0,
+                );
+
+                $restart = $session->waitForRecord(
+                    static fn(array $record): bool => $record['message'] === 'Worker restarting after unexpected exit.'
+                        && ($record['context']['attempt'] ?? null) === $attempt,
+                    10.0,
+                );
+                $delays[] = $restart['context']['delay_seconds'] ?? null;
+
+                $startRecord = $session->waitForRecord(
+                    static fn(array $record): bool => $record['message'] === 'Worker started.',
+                    20.0,
+                );
+                $pid = $startRecord['context']['pid'] ?? null;
+                self::assertIsInt($pid);
+            }
+
+            // Default backoff: base=1, max=30 → delays = 1, 2, 4 seconds (1 * 2^(attempt-1)).
+            self::assertSame([1, 2, 4], $delays);
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testSigtermDrainsInFlightMessageBeforeExit(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $this->waitForWorkerStart($session, 5.0);
+            $this->dispatchFixtureMessages(1, 'sleep:2');
+
+            $this->waitForStdoutJsonLine(
+                $session,
+                static fn(array $record): bool => ($record['message'] ?? null) === 'Fixture sleep handler entered.',
+                10.0,
+            );
+
+            $session->signal(SIGTERM);
+
+            $sigtermAt = microtime(true);
+            $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'Sent SIGTERM to worker.',
+                5.0,
+            );
+
+            $this->waitForStdoutJsonLine(
+                $session,
+                static fn(array $record): bool => ($record['message'] ?? null) === 'Fixture message handled.'
+                    && ($record['context']['payload'] ?? null) === 'sleep:2',
+                10.0,
+            );
+            $handledAt = microtime(true);
+
+            self::assertGreaterThan(
+                0.0,
+                $handledAt - $sigtermAt,
+                'In-flight message must finish handling AFTER SIGTERM.',
+            );
+
+            self::assertSame(0, $session->waitForExit(10.0));
+
+            foreach ($session->getRecords() as $record) {
+                self::assertNotSame(
+                    'Sent SIGKILL to worker after shutdown timeout.',
+                    $record['message'],
+                    'Worker should drain in-flight message without SIGKILL.',
+                );
+            }
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testMetricsExposesMessagesProcessedCounterAfterConsume(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $httpRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'HTTP server listening.',
+                5.0,
+            );
+            $rawAddress = $httpRecord['context']['address'] ?? null;
+            self::assertIsString($rawAddress);
+            $address = str_replace('tcp://', '', $rawAddress);
+
+            $this->waitForWorkerStart($session, 5.0);
+
+            $payload = 'metrics-counter';
+            $messageCount = 3;
+            $this->dispatchFixtureMessages($messageCount, $payload);
+
+            for ($i = 0; $i < $messageCount; $i += 1) {
+                $session->waitForRecord(
+                    static function (array $record) use ($payload): bool {
+                        if ($record['message'] !== 'Fixture message handled.') {
+                            return false;
+                        }
+                        $recordPayload = $record['context']['payload'] ?? null;
+                        return is_string($recordPayload) && str_starts_with($recordPayload, $payload);
+                    },
+                    10.0,
+                );
+            }
+
+            // The supervisor increments the counter on the IPC ProcessedCommandMessage,
+            // which arrives slightly after the worker logs "Fixture message handled.".
+            // Poll /metrics until the counter reaches the expected value.
+            $start = microtime(true);
+            $body = '';
+            $matched = false;
+            while ((microtime(true) - $start) < 5.0) {
+                $body = (string) @file_get_contents("http://{$address}/metrics");
+                if (preg_match('/messenger_messages_processed_total\{[^}]*transport="async"[^}]*\} (\d+)/', $body, $m) === 1
+                    && (int) $m[1] >= $messageCount
+                ) {
+                    $matched = true;
+                    break;
+                }
+                usleep(100000);
+            }
+
+            self::assertTrue(
+                $matched,
+                sprintf('Expected messenger_messages_processed_total{transport="async"} >= %d. Got: %s', $messageCount, $body),
+            );
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
+    public function testIpcPongUpdatesLastPongTimestampMetric(): void
+    {
+        // Default ping interval is 50 ticks * 200ms = 10s. Wait for two pong cycles
+        // and assert the worker_last_pong_timestamp gauge advances each cycle.
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $httpRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'HTTP server listening.',
+                5.0,
+            );
+            $rawAddress = $httpRecord['context']['address'] ?? null;
+            self::assertIsString($rawAddress);
+            $address = str_replace('tcp://', '', $rawAddress);
+
+            $this->waitForWorkerStart($session, 5.0);
+
+            $first = $this->waitForLastPongTimestamp($address, minimumValue: 0.0, timeout: 14.0);
+            $second = $this->waitForLastPongTimestamp($address, minimumValue: $first + 0.5, timeout: 14.0);
+
+            self::assertGreaterThan($first, $second, 'last_pong_timestamp should advance across ping intervals.');
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     /**
      * @return array{level: string, message: string, context: array<string, mixed>}
      */
@@ -517,6 +697,33 @@ final class ProcessCommandTest extends TestCase
             $url,
             $timeout,
             $lastBody,
+        ));
+    }
+
+    private function waitForLastPongTimestamp(string $address, float $minimumValue, float $timeout): float
+    {
+        $start = microtime(true);
+        $latest = null;
+
+        while ((microtime(true) - $start) < $timeout) {
+            $body = (string) @file_get_contents("http://{$address}/metrics");
+
+            if (preg_match('/worker_last_pong_timestamp\{worker="1"\} ([\d.]+)/', $body, $m) === 1) {
+                $value = (float) $m[1];
+                if ($value > $minimumValue) {
+                    return $value;
+                }
+                $latest = $value;
+            }
+
+            usleep(200000);
+        }
+
+        throw new \RuntimeException(sprintf(
+            'Timed out after %.1fs waiting for worker_last_pong_timestamp > %.3f. Latest seen: %s',
+            $timeout,
+            $minimumValue,
+            $latest === null ? '(none)' : (string) $latest,
         ));
     }
 
