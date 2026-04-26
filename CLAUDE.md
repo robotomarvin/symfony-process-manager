@@ -10,15 +10,28 @@ A Symfony 7.4 bundle (PHP 8.5+) that supervises Symfony Messenger `messenger:con
 
 ## Commands
 
-See `CONTRIBUTING.md` for the full list of composer scripts. Quick reference for running individual tests:
+**Use the `Makefile` as the canonical entry point.** It wraps Docker Compose so commands run in the project's containerized toolchain (correct PHP version, extensions, vendor volume). Do NOT shell out to `composer`, `./vendor/bin/phpunit`, or `php-cs-fixer` directly on the host — they may not exist or may use the wrong runtime.
+
+Run `make help` to list targets. Common ones:
 
 ```bash
-# Single test file
-./vendor/bin/phpunit tests/Unit/Command/Serve/ProcessManagerLoopTest.php
+make install   # composer install (in container)
+make test      # PHPUnit (E2E binds 127.0.0.1:0)
+make cs        # coding standards check
+make cs-fix    # auto-fix coding standards
+make analyse   # PHPStan
+make check     # analyse + test (full quality gate)
+make shell     # interactive shell in app container
+```
 
-# Single test method
+Running a single test still goes through the container — open `make shell`, then:
+
+```bash
+./vendor/bin/phpunit tests/Unit/Command/Serve/ProcessManagerLoopTest.php
 ./vendor/bin/phpunit --filter testSingleWorkerFailureLimitTriggersShutdown
 ```
+
+If a workflow needs a target the Makefile lacks, add it to the Makefile rather than bypassing it.
 
 ## Architecture
 
@@ -42,6 +55,28 @@ See `CONTRIBUTING.md` for the full list of composer scripts. Quick reference for
 
 ### Configuration & DI
 `Configuration` defines the bundle config schema. `SymfonyProcessManagerExtension` loads `services.yaml` and wires transport configs + HTTP settings into `ServeCommand`. Value objects `TransportConfig` and `ConsumeArgs` are immutable (`readonly`) with factory methods.
+
+## Specification Docs (`spec/`)
+
+`spec/` is the **source of truth** for runtime behavior, configuration schema, IPC, metrics, HTTP API, autoscaler, shutdown, and worker lifecycle. Index lives in `spec/README.md`. Files: `architecture.md`, `configuration.md`, `autoscaler.md`, `worker-lifecycle.md`, `ipc-protocol.md`, `http-api.md`, `metrics.md`, `shutdown.md`, `testing.md`.
+
+**Rule: code and spec change together.** Any PR that alters observable behavior MUST update the matching spec file in the same change. Spec drift is a bug.
+
+Triggers — if your change touches any of these, update `spec/`:
+
+| Change | Update |
+|---|---|
+| Bundle config schema (`Configuration.php`, transport options, autoscaler knobs) | `configuration.md`, `autoscaler.md` if scaling-related |
+| New/changed metric, label, or semantics | `metrics.md` |
+| HTTP route, response shape, status code | `http-api.md` |
+| IPC message format, prefix, or direction | `ipc-protocol.md` |
+| Worker restart/backoff/failure-limit logic | `worker-lifecycle.md` |
+| Shutdown trigger, signal handling, drain order | `shutdown.md` |
+| Autoscaler strategy, EWMA, arbitration, thresholds | `autoscaler.md` |
+| New component, dependency direction, or runtime data flow | `architecture.md` |
+| New test util, fake, or testing convention | `testing.md` |
+
+Before declaring work complete, grep the spec for terms you renamed/removed and confirm no stale references remain. `README.md` user-facing docs also stay in sync (per `CONTRIBUTING.md`).
 
 ## Testing Notes
 
