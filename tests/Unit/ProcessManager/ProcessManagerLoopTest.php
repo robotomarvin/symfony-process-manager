@@ -13,10 +13,10 @@ use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcFanout;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
-use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Ipc\WorkerContext;
 use SymfonyProcessManager\Ipc\WorkerContextInterface;
+use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
@@ -43,6 +43,7 @@ final class ProcessManagerLoopTest extends TestCase
     private MetricsRegistry $metrics;
     private IpcFanout $ipcFanout;
     private WorkerContextInterface $workerContext;
+    private MessageClassResolver $messageClassResolver;
 
     protected function setUp(): void
     {
@@ -65,6 +66,7 @@ final class ProcessManagerLoopTest extends TestCase
         );
         $this->ipcFanout = new IpcFanout(new IpcCodec(), new NullLogger());
         $this->workerContext = new WorkerContext();
+        $this->messageClassResolver = new MessageClassResolver();
     }
 
     public function testSingleWorkerFailureLimitTriggersShutdown(): void
@@ -344,55 +346,98 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertStringContainsString('process_manager_running', $output);
     }
 
-    public function testHandledProcessedCommandMessageIncrementsMessagesCounter(): void
+    public function testHandledMessengerEventIncrementsProcessedCounterAndObservesDuration(): void
     {
-        $process = $this->createMock(Process::class);
-        $process->method('isRunning')->willReturn(true);
-        $process->method('getPid')->willReturn(12345);
-        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
-
-        $factory = new FakeProcessFactory();
-        $factory->addProcess($process);
-
-        $loop = $this->createLoop($factory, $this->buildPools(processes: 1));
+        $loop = $this->createRunningLoopForIpc();
 
         $loop->tick();
 
-        $codec = new IpcCodec();
-        $encodedLine = $codec->encode(new ProcessedCommandMessage('handled', 'App\Message\TestMessage'));
-        $this->outputHandler->handleOutput(1, Process::OUT, $encodedLine . "\n");
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+            durationSeconds: 0.42,
+        ));
 
         $loop->tick();
 
         $output = $this->metrics->toPrometheusText();
-        self::assertStringContainsString('messages_processed_total{transport="async"} 1', $output);
+        self::assertStringContainsString('messenger_messages_processed_total{message_class="App\\\\Message\\\\TestMessage",transport="async"} 1', $output);
+        self::assertStringContainsString('messenger_message_duration_seconds_bucket', $output);
+        self::assertStringContainsString('messenger_message_duration_seconds_sum', $output);
+        self::assertStringContainsString('messenger_message_duration_seconds_count', $output);
     }
 
-    public function testFailedProcessedCommandMessageDoesNotIncrementMessagesCounter(): void
+    public function testFailedMessengerEventIncrementsFailedCounterNotProcessed(): void
     {
-        $process = $this->createMock(Process::class);
-        $process->method('isRunning')->willReturn(true);
-        $process->method('getPid')->willReturn(12345);
-        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
-
-        $factory = new FakeProcessFactory();
-        $factory->addProcess($process);
-
-        $loop = $this->createLoop($factory, $this->buildPools(processes: 1));
+        $loop = $this->createRunningLoopForIpc();
 
         $loop->tick();
 
-        $codec = new IpcCodec();
-        $encodedLine = $codec->encode(new ProcessedCommandMessage('failed', 'App\Message\TestMessage', 'Something went wrong'));
-        $this->outputHandler->handleOutput(1, Process::OUT, $encodedLine . "\n");
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_FAILED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+            durationSeconds: 0.1,
+            errorClass: 'RuntimeException',
+        ));
 
         $loop->tick();
 
         $output = $this->metrics->toPrometheusText();
-        self::assertStringNotContainsString('messages_processed_total', $output);
+        self::assertStringContainsString('messenger_messages_failed_total{message_class="App\\\\Message\\\\TestMessage",transport="async"} 1', $output);
+        self::assertStringNotContainsString('messenger_messages_processed_total', $output);
     }
 
-    public function testStartedHandlingMessageMarksWorkerBusyAndProcessedMarksIdle(): void
+    public function testRetriedMessengerEventIncrementsRetriedCounter(): void
+    {
+        $loop = $this->createRunningLoopForIpc();
+
+        $loop->tick();
+
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_RETRIED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+        ));
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('messenger_messages_retried_total{message_class="App\\\\Message\\\\TestMessage",transport="async"} 1', $output);
+    }
+
+    public function testInFlightGaugeIncrementsOnReceivedAndDecrementsOnHandled(): void
+    {
+        $loop = $this->createRunningLoopForIpc();
+
+        $loop->tick();
+
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_RECEIVED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+        ));
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('messenger_messages_in_flight{transport="async"} 1', $output);
+
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+            durationSeconds: 0.05,
+        ));
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('messenger_messages_in_flight{transport="async"} 0', $output);
+    }
+
+    public function testReceivedMessageMarksWorkerBusyHandledMarksIdle(): void
     {
         $process = $this->createMock(Process::class);
         $process->method('isRunning')->willReturn(true);
@@ -408,18 +453,109 @@ final class ProcessManagerLoopTest extends TestCase
         $loop->tick();
         self::assertSame(0, $pools[0]->busyWorkerCount());
 
-        $codec = new IpcCodec();
-        $busy = $codec->encode(new WorkerStartedHandlingMessage('App\Foo'));
-        $this->outputHandler->handleOutput(1, Process::OUT, $busy . "\n");
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_RECEIVED,
+            command: 'App\\Foo',
+            transport: 'async',
+        ));
         $loop->tick();
 
         self::assertSame(1, $pools[0]->busyWorkerCount());
 
-        $done = $codec->encode(new ProcessedCommandMessage('handled', 'App\Foo'));
-        $this->outputHandler->handleOutput(1, Process::OUT, $done . "\n");
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Foo',
+            transport: 'async',
+            durationSeconds: 0.01,
+        ));
         $loop->tick();
 
         self::assertSame(0, $pools[0]->busyWorkerCount());
+    }
+
+    public function testWhitelistResolverBucketsUnknownClassesUnderOther(): void
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(processes: 1),
+            messageClassResolver: new MessageClassResolver(['App\\Allowed\\*']),
+        );
+
+        $loop->tick();
+
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Other\\Message',
+            transport: 'async',
+            durationSeconds: 0.01,
+        ));
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('message_class="other"', $output);
+        self::assertStringNotContainsString('App\\\\Other\\\\Message', $output);
+    }
+
+    public function testMessagesMetricsDisabledSkipsMessengerMetrics(): void
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(processes: 1),
+            messagesMetricsEnabled: false,
+        );
+
+        $loop->tick();
+
+        $this->feedIpcMessage(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Message\\TestMessage',
+            transport: 'async',
+            durationSeconds: 0.1,
+        ));
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringNotContainsString('messenger_messages_processed_total', $output);
+        self::assertStringNotContainsString('messenger_message_duration_seconds', $output);
+        self::assertStringNotContainsString('messenger_messages_in_flight', $output);
+    }
+
+    private function createRunningLoopForIpc(): ProcessManagerLoop
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        return $this->createLoop($factory, $this->buildPools(processes: 1));
+    }
+
+    private function feedIpcMessage(MessengerEventMessage $message): void
+    {
+        $codec = new IpcCodec();
+        $encodedLine = $codec->encode($message);
+        $this->outputHandler->handleOutput(1, Process::OUT, $encodedLine . "\n");
     }
 
     public function testSigkillSentAfterShutdownTimeout(): void
@@ -544,19 +680,23 @@ final class ProcessManagerLoopTest extends TestCase
         WorkerProcessFactoryInterface $factory,
         array $pools,
         ?int $shutdownTimeoutSeconds = 30,
+        ?MessageClassResolver $messageClassResolver = null,
+        bool $messagesMetricsEnabled = true,
     ): ProcessManagerLoop {
         return new ProcessManagerLoop(
-            $this->reactLoop,
-            $this->shutdownState,
-            $this->clock,
-            $this->logger,
-            $factory,
-            $this->outputHandler,
-            $pools,
-            $this->metrics,
-            $this->ipcFanout,
-            $this->workerContext,
-            $shutdownTimeoutSeconds,
+            loop: $this->reactLoop,
+            shutdownState: $this->shutdownState,
+            clock: $this->clock,
+            logger: $this->logger,
+            processFactory: $factory,
+            outputHandler: $this->outputHandler,
+            pools: $pools,
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            messageClassResolver: $messageClassResolver ?? $this->messageClassResolver,
+            messagesMetricsEnabled: $messagesMetricsEnabled,
+            shutdownTimeoutSeconds: $shutdownTimeoutSeconds,
         );
     }
 

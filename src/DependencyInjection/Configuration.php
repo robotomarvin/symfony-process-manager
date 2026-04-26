@@ -42,6 +42,44 @@ final class Configuration implements ConfigurationInterface
                         ->integerNode('port')->defaultValue(9100)->min(0)->end()
                     ->end()
                 ->end()
+                ->arrayNode('metrics')
+                    ->addDefaultsIfNotSet()
+                    ->children()
+                        ->arrayNode('messages')
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->booleanNode('enabled')->defaultTrue()->end()
+                                ->arrayNode('whitelist')
+                                    ->scalarPrototype()->end()
+                                    ->defaultValue([])
+                                ->end()
+                                ->arrayNode('duration_buckets')
+                                    ->floatPrototype()->end()
+                                    ->defaultValue([0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0])
+                                    ->validate()
+                                        ->ifTrue(static fn(array $v): bool => $v === [])
+                                        ->thenInvalid('metrics.messages.duration_buckets must contain at least one bucket.')
+                                    ->end()
+                                    ->beforeNormalization()
+                                        ->ifArray()
+                                        ->then(static function (array $values): array {
+                                            $floats = [];
+
+                                            foreach ($values as $value) {
+                                                $floats[] = (float) $value;
+                                            }
+
+                                            $floats = array_values(array_unique($floats, \SORT_NUMERIC));
+                                            sort($floats, \SORT_NUMERIC);
+
+                                            return $floats;
+                                        })
+                                    ->end()
+                                ->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
                 ->arrayNode('transports')
                     ->isRequired()
                     ->requiresAtLeastOneElement()

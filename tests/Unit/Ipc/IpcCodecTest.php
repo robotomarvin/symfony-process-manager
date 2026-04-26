@@ -7,9 +7,9 @@ namespace SymfonyProcessManager\Tests\Unit\Ipc;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Ipc\IpcCodec;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
 
 #[CoversClass(IpcCodec::class)]
 final class IpcCodecTest extends TestCase
@@ -53,27 +53,39 @@ final class IpcCodecTest extends TestCase
         self::assertInstanceOf(PongMessage::class, $decoded);
     }
 
-    public function testRoundTripProcessedCommandMessage(): void
+    public function testRoundTripMessengerEventMessage(): void
     {
-        $original = new ProcessedCommandMessage('handled', 'App\\Message\\Test', null);
+        $original = new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Message\\Test',
+            transport: 'async',
+            durationSeconds: 0.42,
+        );
         $encoded = $this->codec->encode($original);
         $decoded = $this->codec->decode($encoded);
 
-        self::assertInstanceOf(ProcessedCommandMessage::class, $decoded);
-        self::assertSame('handled', $decoded->status);
+        self::assertInstanceOf(MessengerEventMessage::class, $decoded);
+        self::assertSame('handled', $decoded->event);
         self::assertSame('App\\Message\\Test', $decoded->command);
-        self::assertNull($decoded->errorInfo);
+        self::assertSame('async', $decoded->transport);
+        self::assertSame(0.42, $decoded->durationSeconds);
+        self::assertNull($decoded->errorClass);
     }
 
-    public function testRoundTripProcessedCommandMessageWithError(): void
+    public function testRoundTripMessengerEventMessageWithError(): void
     {
-        $original = new ProcessedCommandMessage('failed', 'App\\Message\\Test', 'Something broke');
+        $original = new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_FAILED,
+            command: 'App\\Message\\Test',
+            transport: 'async',
+            errorClass: 'RuntimeException',
+        );
         $encoded = $this->codec->encode($original);
         $decoded = $this->codec->decode($encoded);
 
-        self::assertInstanceOf(ProcessedCommandMessage::class, $decoded);
-        self::assertSame('failed', $decoded->status);
-        self::assertSame('Something broke', $decoded->errorInfo);
+        self::assertInstanceOf(MessengerEventMessage::class, $decoded);
+        self::assertSame('failed', $decoded->event);
+        self::assertSame('RuntimeException', $decoded->errorClass);
     }
 
     public function testDecodeReturnsNullForNonIpcLine(): void

@@ -18,10 +18,12 @@ use SymfonyProcessManager\Autoscaler\Strategy\ScalingStrategyInterface;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyRegistry;
 use SymfonyProcessManager\Http\HttpServer;
+use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
 use SymfonyProcessManager\ProcessManager\WorkerPool;
 use SymfonyProcessManager\Transport\ConsumeArgs;
 use SymfonyProcessManager\Transport\TransportConfig;
+use SymfonyProcessManager\Worker\WorkerIpcSubscriber;
 
 final class SymfonyProcessManagerExtension extends Extension
 {
@@ -40,12 +42,22 @@ final class SymfonyProcessManagerExtension extends Extension
         $shutdownTimeout = $config['shutdown_timeout'];
         $totalCap = $config['total_cap'] ?? null;
         $autoscalerInterval = $config['autoscaler_interval_sec'];
+        $messages = $config['metrics']['messages'];
 
         $poolDefinitions = $this->buildPoolDefinitions($container, $config['transports']);
 
+        $container->getDefinition(MessageClassResolver::class)
+            ->setArgument('$whitelist', $messages['whitelist']);
+
         $container->getDefinition(ProcessManagerLoop::class)
             ->setArgument('$pools', $poolDefinitions)
+            ->setArgument('$messagesMetricsEnabled', $messages['enabled'])
+            ->setArgument('$durationBuckets', $messages['duration_buckets'])
             ->setArgument('$shutdownTimeoutSeconds', $shutdownTimeout === 0 ? null : $shutdownTimeout);
+
+        if (!$messages['enabled']) {
+            $container->removeDefinition(WorkerIpcSubscriber::class);
+        }
 
         $container->getDefinition(AutoscalerLoop::class)
             ->setArgument('$pools', $poolDefinitions)
