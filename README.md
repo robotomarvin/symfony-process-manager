@@ -37,6 +37,8 @@ Create `config/packages/symfony_process_manager.yaml`:
 
 ```yaml
 symfony_process_manager:
+  shutdown_timeout: 30
+
   http_server:
     host: 127.0.0.1
     port: 9100
@@ -57,6 +59,10 @@ symfony_process_manager:
         queues: []
         extra: []
 ```
+
+### Top-Level Options
+
+- `shutdown_timeout` (int seconds, default 30) — after SIGTERM is sent to workers, wait this many seconds before escalating to SIGKILL. Set to `0` to wait indefinitely.
 
 ### Transport Options
 
@@ -113,6 +119,7 @@ The `/metrics` endpoint exposes Prometheus metrics including:
 - `worker_exits_total{exit_code=...}` (counter)
 - `worker_failures_total{transport=...}` (counter)
 - `worker_backoffs_total{transport=...}` (counter)
+- `worker_sigkills_total` (counter)
 - `messages_processed_total{transport=...}` (counter)
 
 ## Development

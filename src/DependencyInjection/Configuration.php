@@ -15,6 +15,11 @@ final class Configuration implements ConfigurationInterface
 
         $treeBuilder->getRootNode()
             ->children()
+                ->integerNode('shutdown_timeout')
+                    ->defaultValue(30)
+                    ->min(0)
+                    ->info('Seconds to wait after SIGTERM before escalating to SIGKILL. 0 = wait indefinitely.')
+                ->end()
                 ->arrayNode('http_server')
                     ->addDefaultsIfNotSet()
                     ->children()

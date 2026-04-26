@@ -31,6 +31,16 @@ final class FixtureMessageHandler
             exit(1);
         }
 
+        if ($message->payload === 'sigterm-ignore') {
+            pcntl_async_signals(false);
+            pcntl_signal(SIGTERM, SIG_IGN);
+            pcntl_signal(SIGINT, SIG_IGN);
+            $this->logger->info('Fixture sigterm-ignore handler entered.');
+            sleep(60);
+
+            return;
+        }
+
         $this->logger->info('Fixture message handled.', [
             'payload' => $message->payload,
         ]);

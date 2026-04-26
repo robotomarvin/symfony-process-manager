@@ -24,7 +24,7 @@ final class ShutdownStateTest extends TestCase
     {
         $state = new ShutdownState();
 
-        $state->request(ShutdownReason::SIGNAL);
+        $state->request(ShutdownReason::SIGNAL, 100.0);
 
         self::assertTrue($state->isRequested());
         self::assertSame(ShutdownReason::SIGNAL, $state->getReason());
@@ -34,7 +34,7 @@ final class ShutdownStateTest extends TestCase
     {
         $state = new ShutdownState();
 
-        $state->request(ShutdownReason::FAILURE_LIMIT);
+        $state->request(ShutdownReason::FAILURE_LIMIT, 100.0);
 
         self::assertTrue($state->isRequested());
         self::assertSame(ShutdownReason::FAILURE_LIMIT, $state->getReason());
@@ -44,10 +44,47 @@ final class ShutdownStateTest extends TestCase
     {
         $state = new ShutdownState();
 
-        $state->request(ShutdownReason::SIGNAL);
-        $state->request(ShutdownReason::FAILURE_LIMIT);
+        $state->request(ShutdownReason::SIGNAL, 100.0);
+        $state->request(ShutdownReason::FAILURE_LIMIT, 200.0);
 
         self::assertTrue($state->isRequested());
         self::assertSame(ShutdownReason::SIGNAL, $state->getReason());
+    }
+
+    public function testRequestRecordsTimestamp(): void
+    {
+        $state = new ShutdownState();
+
+        $state->request(ShutdownReason::SIGNAL, 1234.5);
+
+        self::assertSame(1234.5, $state->getRequestedAt());
+    }
+
+    public function testRequestedAtIsNullBeforeRequest(): void
+    {
+        $state = new ShutdownState();
+
+        self::assertNull($state->getRequestedAt());
+    }
+
+    public function testSecondRequestPreservesOriginalTimestamp(): void
+    {
+        $state = new ShutdownState();
+
+        $state->request(ShutdownReason::SIGNAL, 100.0);
+        $state->request(ShutdownReason::FAILURE_LIMIT, 500.0);
+
+        self::assertSame(100.0, $state->getRequestedAt());
+    }
+
+    public function testSigkillSentLifecycle(): void
+    {
+        $state = new ShutdownState();
+
+        self::assertFalse($state->isSigkillSent());
+
+        $state->markSigkillSent();
+
+        self::assertTrue($state->isSigkillSent());
     }
 }

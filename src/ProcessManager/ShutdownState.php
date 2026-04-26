@@ -8,6 +8,8 @@ final class ShutdownState
 {
     private bool $requested = false;
     private ?ShutdownReason $reason = null;
+    private ?float $requestedAt = null;
+    private bool $sigkillSent = false;
 
     public function isRequested(): bool
     {
@@ -19,7 +21,22 @@ final class ShutdownState
         return $this->reason;
     }
 
-    public function request(ShutdownReason $reason): void
+    public function getRequestedAt(): ?float
+    {
+        return $this->requestedAt;
+    }
+
+    public function isSigkillSent(): bool
+    {
+        return $this->sigkillSent;
+    }
+
+    public function markSigkillSent(): void
+    {
+        $this->sigkillSent = true;
+    }
+
+    public function request(ShutdownReason $reason, float $now): void
     {
         if ($this->requested) {
             return;
@@ -27,5 +44,6 @@ final class ShutdownState
 
         $this->requested = true;
         $this->reason = $reason;
+        $this->requestedAt = $now;
     }
 }

@@ -20,8 +20,10 @@ final class SymfonyProcessManagerExtension extends Extension
 
         $config = $this->processConfiguration(new Configuration(), $configs);
 
+        $shutdownTimeout = $config['shutdown_timeout'];
         $container->getDefinition(ProcessManagerLoop::class)
-            ->setArgument('$transportConfigs', $config['transports']);
+            ->setArgument('$transportConfigs', $config['transports'])
+            ->setArgument('$shutdownTimeoutSeconds', $shutdownTimeout === 0 ? null : $shutdownTimeout);
 
         $container->getDefinition(ServeCommand::class)
             ->setArgument('$httpHost', $config['http_server']['host'])

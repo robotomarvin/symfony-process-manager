@@ -19,6 +19,11 @@ return [
 # config/packages/symfony_process_manager.yaml
 symfony_process_manager:
 
+  # Seconds to wait after SIGTERM before escalating to SIGKILL.
+  # 0 = wait indefinitely (no SIGKILL escalation).
+  # Min: 0. Default: 30.
+  shutdown_timeout: 30
+
   # HTTP server for health checks and Prometheus metrics.
   # The server is always started; disable by not scraping it.
   http_server:
@@ -183,7 +188,7 @@ Options with `null` values are omitted from the command line entirely.
 
 The `SymfonyProcessManagerExtension` loads `Resources/config/services.yaml` and then injects the processed configuration into services:
 
-- `ProcessManagerLoop` receives the `TransportConfig[]` array (one per transport key).
+- `ProcessManagerLoop` receives the `TransportConfig[]` array (one per transport key) and `shutdownTimeoutSeconds` (`null` when configured value is `0`, the integer otherwise).
 - `ServeCommand` receives `httpHost` and `httpPort` as scalar constructor arguments.
 
 Transport config objects (`TransportConfig`, `ConsumeArgs`) are value objects instantiated by the extension at container compile time.
