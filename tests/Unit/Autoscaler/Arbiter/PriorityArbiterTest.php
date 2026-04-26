@@ -94,6 +94,35 @@ final class PriorityArbiterTest extends TestCase
         self::assertSame(5, array_sum($allocated));
     }
 
+    public function testLeftoverTieBreakIsAlphabeticalRegardlessOfInputOrder(): void
+    {
+        $aaa = $this->makePool('aaa', min: 1, max: 10, priority: 0);
+        $zzz = $this->makePool('zzz', min: 1, max: 10, priority: 0);
+
+        // Cap 3 → mins use 2, remaining 1. Both demand 1 above min.
+        // Proportional shares: floor(1 * 1/2) = 0 each, remainder 0.5 each → tied.
+        // activeWorkerCount() is 0 for both (brand-new pools) → tied.
+        // Final tie-break must be alphabetical → 'aaa' gets the +1.
+        $arbiter = new PriorityArbiter(3);
+
+        // Input order with 'zzz' first to prove ordering does not depend on iteration order.
+        $allocated = $arbiter->allocate(
+            ['zzz' => 2, 'aaa' => 2],
+            ['zzz' => $zzz, 'aaa' => $aaa],
+        );
+
+        self::assertSame(2, $allocated['aaa']);
+        self::assertSame(1, $allocated['zzz']);
+
+        // Second invocation must produce the same result (no hidden cross-call state).
+        $again = $arbiter->allocate(
+            ['zzz' => 2, 'aaa' => 2],
+            ['zzz' => $zzz, 'aaa' => $aaa],
+        );
+
+        self::assertSame($allocated, $again);
+    }
+
     public function testCapEqualsSumOfMinsLeavesNothingToDistribute(): void
     {
         $a = $this->makePool('a', min: 2, max: 5, priority: 0);
