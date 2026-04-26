@@ -151,7 +151,73 @@ Updated in `handleIpcMessage()` when a `PongMessage` is received.
 messages_processed_total{transport="async"} 1427
 ```
 
-Incremented by `WorkerOutputFormatter` when it detects a "was handled successfully" string in a worker log line, OR by `ProcessManagerLoop::handleIpcMessage()` when it receives a `ProcessedCommandMessage` with `status=handled`.
+Incremented by `ProcessManagerLoop::handleIpcMessage()` when it receives a `ProcessedCommandMessage` with `status=handled`.
+
+---
+
+### `worker_busy`
+
+**Type:** Gauge
+**Labels:** `worker`, `transport`
+**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker enters draining or exits.
+
+Set on `WorkerStartedHandlingMessage` (busy) and `ProcessedCommandMessage` (idle).
+
+---
+
+### `worker_busy_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Count of currently-busy workers per pool, set by the autoscaler on each evaluation.
+
+---
+
+### `autoscaler_target_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Last autoscaler decision after the stability layer (clamp/step/cooldowns).
+
+---
+
+### `autoscaler_current_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Active worker count per pool, excluding draining workers.
+
+---
+
+### `autoscaler_unmet_demand`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** `desired - allocated` per autoscaler evaluation, after `PriorityArbiter`. Always 0 when `total_cap` is unset.
+
+---
+
+### `autoscaler_scale_up_total` / `autoscaler_scale_down_total`
+
+**Type:** Counter
+**Labels:** `transport`
+**Description:** Number of scale-up / scale-down events applied (after stability layer). Skipped decisions (cooldown, step cap, at min/max) are not counted here.
+
+---
+
+### `autoscaler_decisions_skipped_total`
+
+**Type:** Counter
+**Labels:** `transport`, `reason`
+**Description:** Number of autoscaler decisions skipped by the stability layer.
+
+`reason` values:
+
+- `cooldown_up` — scale-up cooldown not elapsed
+- `cooldown_down` — scale-down cooldown not elapsed
+- `step_cap` — direction was capped to zero by the step cap
+- `at_min` — already at `min`
+- `at_max` — already at `max`
 
 ---
 

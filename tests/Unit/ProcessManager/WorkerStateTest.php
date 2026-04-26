@@ -7,6 +7,7 @@ namespace SymfonyProcessManager\Tests\Unit\ProcessManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use SymfonyProcessManager\ProcessManager\WorkerRunState;
 use SymfonyProcessManager\ProcessManager\WorkerState;
 
 #[CoversClass(WorkerState::class)]
@@ -204,5 +205,54 @@ final class WorkerStateTest extends TestCase
 
         $state->markStopSignalSent();
         self::assertTrue($state->isStopSignalSent());
+    }
+
+    public function testInitialRunStateIsIdle(): void
+    {
+        $state = WorkerState::create(1);
+
+        self::assertSame(WorkerRunState::Idle, $state->getRunState());
+        self::assertFalse($state->isBusy());
+    }
+
+    public function testMarkBusyAndIdleTransitions(): void
+    {
+        $state = WorkerState::create(1);
+
+        $state->markBusy();
+        self::assertTrue($state->isBusy());
+        self::assertSame(WorkerRunState::Busy, $state->getRunState());
+
+        $state->markIdle();
+        self::assertFalse($state->isBusy());
+    }
+
+    public function testMarkStartedResetsToIdle(): void
+    {
+        $state = WorkerState::create(1);
+        $state->markBusy();
+
+        $state->markStarted();
+
+        self::assertFalse($state->isBusy());
+    }
+
+    public function testMarkDrainingMarksStoppedAndDraining(): void
+    {
+        $state = WorkerState::create(1);
+
+        $state->markDraining();
+
+        self::assertTrue($state->isDraining());
+        self::assertFalse($state->shouldStart(0.0));
+    }
+
+    public function testLastPongLifecycle(): void
+    {
+        $state = WorkerState::create(1);
+        self::assertNull($state->getLastPongAt());
+
+        $state->setLastPongAt(123.4);
+        self::assertSame(123.4, $state->getLastPongAt());
     }
 }

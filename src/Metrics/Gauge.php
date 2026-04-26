@@ -23,6 +23,15 @@ final class Gauge
         $this->values[$key] = $value;
     }
 
+    /**
+     * @param array<string, string> $labels
+     */
+    public function remove(array $labels): void
+    {
+        $key = self::serializeLabels($labels);
+        unset($this->values[$key]);
+    }
+
     public function getName(): string
     {
         return $this->name;

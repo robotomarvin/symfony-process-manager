@@ -41,6 +41,18 @@ final class MetricsRegistry
         $this->gauges[$name]->set($value, $labels);
     }
 
+    /**
+     * @param array<string, string> $labels
+     */
+    public function removeGauge(string $name, array $labels): void
+    {
+        if (!isset($this->gauges[$name])) {
+            return;
+        }
+
+        $this->gauges[$name]->remove($labels);
+    }
+
     public function toPrometheusText(): string
     {
         return $this->renderer->render($this->counters, $this->gauges);

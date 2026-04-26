@@ -24,6 +24,15 @@ symfony_process_manager:
   # Min: 0. Default: 30.
   shutdown_timeout: 30
 
+  # Optional global ceiling on the sum of workers across all pools.
+  # When set, a PriorityArbiter shares the cap by priority groups.
+  # Min: 1. Default: null (no cap).
+  total_cap: ~
+
+  # How often the autoscaler evaluates strategies (seconds).
+  # Min: 1. Default: 10.
+  autoscaler_interval_sec: 10
+
   # HTTP server for health checks and Prometheus metrics.
   # The server is always started; disable by not scraping it.
   http_server:
@@ -32,12 +41,31 @@ symfony_process_manager:
 
   # One entry per Symfony Messenger transport name.
   # At least one transport is required.
+  # A transport must use either `processes` (static) OR `autoscaler` (dynamic),
+  # never both — setting both is a configuration error.
   transports:
     <transport_name>:
 
-      # Number of concurrent worker processes for this transport.
-      # Min: 1. Default: 1.
+      # Number of concurrent worker processes (static pool).
+      # Min: 1. Default: 1 (when autoscaler is not configured).
       processes: 1
+
+      # Dynamic worker scaling. Mutually exclusive with `processes`.
+      # When omitted, the pool is static (count = `processes`).
+      autoscaler:
+        min: 1                          # required, min worker count
+        max: 10                         # required, max worker count
+        priority: 0                     # default 0; higher = preferred under total_cap
+        smoothing_window_sec: 30        # default 30; EWMA time constant for busy/idle/throughput
+        scale_up_cooldown_sec: 30       # default 30
+        scale_down_cooldown_sec: 300    # default 300; intentionally longer than up cooldown
+        scale_up_step: 2                # default 2; max workers added per evaluation
+        scale_down_step: 1              # default 1; max workers removed per evaluation
+        strategy:
+          type: utilization             # 'fixed' | 'utilization' | 'service'
+          target: 0.7                   # for utilization: ceil(busy / target). Default 0.7.
+          # id: app.my_strategy         # for type: service. The service must implement
+          #                             # ScalingStrategyInterface.
 
       # How many non-zero exit events within failure_window seconds
       # trigger a full shutdown. Min: 1. Default: 3.
@@ -188,7 +216,10 @@ Options with `null` values are omitted from the command line entirely.
 
 The `SymfonyProcessManagerExtension` loads `Resources/config/services.yaml` and then injects the processed configuration into services:
 
-- `ProcessManagerLoop` receives the `TransportConfig[]` array (one per transport key) and `shutdownTimeoutSeconds` (`null` when configured value is `0`, the integer otherwise).
-- `ServeCommand` receives `httpHost` and `httpPort` as scalar constructor arguments.
+- A `WorkerPool` service is registered per transport (id: `symfony_process_manager.worker_pool.<name>`).
+- `ProcessManagerLoop` receives the list of pools and `shutdownTimeoutSeconds` (`null` when configured value is `0`, the integer otherwise).
+- `AutoscalerLoop` receives the same pools, the `StrategyRegistry`, and the optional `PriorityArbiter` (only constructed when `total_cap` is set).
+- `Orchestrator` owns the run lifecycle: installs the SIGTERM handler, starts each loop participant, runs the React loop, and returns the exit code from `ShutdownState`.
+- `ServeCommand` is a one-line entrypoint that delegates to `Orchestrator::run()`.
 
-Transport config objects (`TransportConfig`, `ConsumeArgs`) are value objects instantiated by the extension at container compile time.
+Transport, autoscaler, and strategy config objects (`TransportConfig`, `ConsumeArgs`, `AutoscalerConfig`, `StrategyConfig`) are value objects instantiated by the extension at container compile time. Transports without an `autoscaler` block synthesize an implicit `AutoscalerConfig::legacyFixed($processes)` so the arbiter sees a homogeneous list.

@@ -92,7 +92,23 @@ The codec decodes a line by:
 @spm:{"type":"RobotoMarvin\\SymfonyProcessManager\\Ipc\\Message\\ProcessedCommandMessage","payload":{"status":"handled","command":"App\\Message\\MyMessage","errorInfo":null}}
 ```
 
-**Manager handling:** Currently used for logging and metrics. The `messages_processed_total` counter is incremented on success.
+**Manager handling:** marks the worker `Idle` (autoscaler signal) and increments `messages_processed_total` on `handled`.
+
+---
+
+### WorkerStartedHandlingMessage
+
+**Direction:** Worker → Manager
+**Purpose:** Reports that a worker is about to dispatch a message to the bus. Drives the autoscaler's busy/idle signal without depending on stdin reads (which are blocked while a handler runs).
+**Payload:**
+
+| Field | Type | Description |
+|---|---|---|
+| `command` | `string` | Fully-qualified class name of the message about to be handled |
+
+Emitted by `WorkerIpcSubscriber::onMessageReceived(WorkerMessageReceivedEvent)`, which fires *before* the bus dispatches the message.
+
+**Manager handling:** marks the worker `Busy` and sets `worker_busy{worker, transport} = 1`. The matching `ProcessedCommandMessage` (handled or failed) flips it back to idle.
 
 ---
 
@@ -147,6 +163,7 @@ The manager drains the IPC queue each tick via `WorkerOutputHandler::getAndClear
 | Event | Handler |
 |---|---|
 | `WorkerRunningEvent` | `onWorkerRunning()` — reads pending IPC messages from stdin |
+| `WorkerMessageReceivedEvent` | `onMessageReceived()` — sends `WorkerStartedHandlingMessage` |
 | `WorkerMessageHandledEvent` | `onMessageHandled()` — sends `ProcessedCommandMessage(status=handled)` |
 | `WorkerMessageFailedEvent` | `onMessageFailed()` — sends `ProcessedCommandMessage(status=failed)` |
 

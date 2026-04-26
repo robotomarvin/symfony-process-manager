@@ -15,15 +15,18 @@ use SymfonyProcessManager\Metrics\MetricsRegistry;
 final class HttpServer
 {
     public function __construct(
+        private readonly LoopInterface $loop,
         private readonly LoggerInterface $logger,
         private readonly MetricsRegistry $metrics,
+        private readonly string $host = '127.0.0.1',
+        private readonly int $port = 9100,
     ) {}
 
-    public function start(LoopInterface $loop, string $host, int $port): void
+    public function start(): void
     {
         $http = new ReactHttpServer(fn(ServerRequestInterface $request): Response => $this->handleRequest($request));
 
-        $socket = new SocketServer("{$host}:{$port}", [], $loop);
+        $socket = new SocketServer("{$this->host}:{$this->port}", [], $this->loop);
         $http->listen($socket);
 
         $this->logger->info('HTTP server listening.', [

@@ -6,6 +6,7 @@ namespace SymfonyProcessManager\Tests\Unit\Transport;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Transport\ConsumeArgs;
 use SymfonyProcessManager\Transport\TransportConfig;
 
@@ -15,26 +16,27 @@ final class TransportConfigTest extends TestCase
     public function testCreateWithAllParameters(): void
     {
         $consumeArgs = ConsumeArgs::create(memoryLimit: 256);
+        $autoscaler = AutoscalerConfig::legacyFixed(4);
 
         $config = TransportConfig::create(
             transport: 'async',
-            processes: 4,
             failureLimit: 5,
             failureWindowSeconds: 120,
             backoffBaseSeconds: 2,
             backoffMaxSeconds: 60,
             pollIntervalMs: 500,
             consumeArgs: $consumeArgs,
+            autoscaler: $autoscaler,
         );
 
         self::assertSame('async', $config->transport);
-        self::assertSame(4, $config->processes);
         self::assertSame(5, $config->failureLimit);
         self::assertSame(120, $config->failureWindowSeconds);
         self::assertSame(2, $config->backoffBaseSeconds);
         self::assertSame(60, $config->backoffMaxSeconds);
         self::assertSame(500, $config->pollIntervalMs);
         self::assertSame($consumeArgs, $config->consumeArgs);
+        self::assertSame($autoscaler, $config->autoscaler);
     }
 
     public function testCreateWithDefaults(): void
@@ -42,13 +44,14 @@ final class TransportConfigTest extends TestCase
         $config = TransportConfig::create(transport: 'async');
 
         self::assertSame('async', $config->transport);
-        self::assertSame(1, $config->processes);
         self::assertSame(3, $config->failureLimit);
         self::assertSame(60, $config->failureWindowSeconds);
         self::assertSame(1, $config->backoffBaseSeconds);
         self::assertSame(30, $config->backoffMaxSeconds);
         self::assertSame(200, $config->pollIntervalMs);
         self::assertSame([], $config->consumeArgs->toCliArguments());
+        self::assertSame(1, $config->autoscaler->min);
+        self::assertSame(1, $config->autoscaler->max);
     }
 
     public function testCreateWithNullConsumeArgsUsesEmptyDefault(): void

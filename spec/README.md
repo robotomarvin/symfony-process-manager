@@ -8,6 +8,7 @@ This directory contains the technical specification for the `robotomarvin/symfon
 |---|---|
 | [architecture.md](architecture.md) | Overall architecture, component map, and runtime data flow |
 | [configuration.md](configuration.md) | Bundle configuration schema and all options |
+| [autoscaler.md](autoscaler.md) | Dynamic worker scaling: strategies, EWMA, arbitration, busy/idle IPC |
 | [worker-lifecycle.md](worker-lifecycle.md) | Worker state machine, restart logic, and failure handling |
 | [ipc-protocol.md](ipc-protocol.md) | Internal IPC protocol between the manager and workers |
 | [http-api.md](http-api.md) | HTTP server endpoints (health and metrics) |

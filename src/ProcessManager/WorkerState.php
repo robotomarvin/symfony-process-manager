@@ -11,6 +11,8 @@ final class WorkerState
 {
     private ?InputStream $inputStream = null;
     private ?float $lastPongAt = null;
+    private WorkerRunState $runState = WorkerRunState::Idle;
+    private bool $draining = false;
 
     public function __construct(
         public readonly int $id,
@@ -37,6 +39,7 @@ final class WorkerState
     public function markStarted(): void
     {
         $this->stopSignalSent = false;
+        $this->runState = WorkerRunState::Idle;
     }
 
     public function isStopSignalSent(): bool
@@ -140,5 +143,36 @@ final class WorkerState
     public function getLastPongAt(): ?float
     {
         return $this->lastPongAt;
+    }
+
+    public function getRunState(): WorkerRunState
+    {
+        return $this->runState;
+    }
+
+    public function markBusy(): void
+    {
+        $this->runState = WorkerRunState::Busy;
+    }
+
+    public function markIdle(): void
+    {
+        $this->runState = WorkerRunState::Idle;
+    }
+
+    public function isBusy(): bool
+    {
+        return $this->runState === WorkerRunState::Busy;
+    }
+
+    public function isDraining(): bool
+    {
+        return $this->draining;
+    }
+
+    public function markDraining(): void
+    {
+        $this->draining = true;
+        $this->stopped = true;
     }
 }

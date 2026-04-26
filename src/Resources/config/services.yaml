@@ -3,6 +3,9 @@ services:
         autowire: true
         autoconfigure: false
 
+    React\EventLoop\LoopInterface:
+        factory: ['React\EventLoop\Loop', 'get']
+
     SymfonyProcessManager\Command\ServeCommand:
         tags: ['console.command']
 
@@ -25,4 +28,11 @@ services:
     SymfonyProcessManager\Metrics\MetricFactoryInterface: '@SymfonyProcessManager\Metrics\MetricFactory'
     SymfonyProcessManager\Metrics\MetricFactory: ~
     SymfonyProcessManager\Metrics\MetricsRegistry: ~
+
+    SymfonyProcessManager\ProcessManager\ShutdownState: ~
     SymfonyProcessManager\ProcessManager\ProcessManagerLoop: ~
+    SymfonyProcessManager\ProcessManager\Orchestrator: ~
+
+    SymfonyProcessManager\Autoscaler\Strategy\StrategyRegistry: ~
+    SymfonyProcessManager\Autoscaler\AutoscalerLoop: ~
+    SymfonyProcessManager\Autoscaler\Arbiter\PriorityArbiter: ~

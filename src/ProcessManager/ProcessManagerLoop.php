@@ -6,7 +6,6 @@ namespace SymfonyProcessManager\ProcessManager;
 
 use Psr\Log\LoggerInterface;
 use React\EventLoop\LoopInterface;
-use React\EventLoop\TimerInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\InputStream;
@@ -15,177 +14,89 @@ use SymfonyProcessManager\Ipc\IpcMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
 use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
+use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
 use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Ipc\WorkerMetadata;
-use SymfonyProcessManager\Transport\ConsumeArgs;
-use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
+use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 final class ProcessManagerLoop
 {
-    /** @var list<TransportConfig> */
-    private readonly array $resolvedTransportConfigs;
-
     private int $ticksSinceLastPing = 0;
 
     /**
-     * @param array<string, array{
-     *     processes: int,
-     *     failure_limit: int,
-     *     failure_window: int,
-     *     backoff_base: int,
-     *     backoff_max: int,
-     *     poll_interval_ms: int,
-     *     consume_args: array{
-     *         memory_limit: int|null,
-     *         time_limit: int|null,
-     *         limit: int|null,
-     *         sleep: int|null,
-     *         queues: list<string>,
-     *         extra: list<string>,
-     *     },
-     * }> $transportConfigs
+     * @param list<WorkerPool> $pools
      */
     public function __construct(
+        private readonly LoopInterface $loop,
+        private readonly ShutdownState $shutdownState,
         private readonly ClockInterface $clock,
         private readonly LoggerInterface $logger,
         private readonly WorkerProcessFactoryInterface $processFactory,
         private readonly WorkerOutputHandler $outputHandler,
-        array $transportConfigs,
+        private readonly array $pools,
         private readonly MetricsRegistry $metrics,
         private readonly IpcFanout $ipcFanout,
         private readonly WorkerContextInterface $workerContext,
         private readonly ?int $shutdownTimeoutSeconds = 30,
         private readonly int $pingIntervalTicks = 50,
-    ) {
-        $this->resolvedTransportConfigs = self::buildTransportConfigs($transportConfigs);
-    }
+    ) {}
 
-    /**
-     * @param array<string, array{
-     *     processes: int,
-     *     failure_limit: int,
-     *     failure_window: int,
-     *     backoff_base: int,
-     *     backoff_max: int,
-     *     poll_interval_ms: int,
-     *     consume_args: array{
-     *         memory_limit: int|null,
-     *         time_limit: int|null,
-     *         limit: int|null,
-     *         sleep: int|null,
-     *         queues: list<string>,
-     *         extra: list<string>,
-     *     },
-     * }> $transports
-     * @return list<TransportConfig>
-     */
-    private static function buildTransportConfigs(array $transports): array
+    public function start(): void
     {
-        $configs = [];
-
-        foreach ($transports as $name => $transport) {
-            $consumeArgs = $transport['consume_args'];
-
-            $configs[] = TransportConfig::create(
-                transport: $name,
-                processes: $transport['processes'],
-                failureLimit: $transport['failure_limit'],
-                failureWindowSeconds: $transport['failure_window'],
-                backoffBaseSeconds: $transport['backoff_base'],
-                backoffMaxSeconds: $transport['backoff_max'],
-                pollIntervalMs: $transport['poll_interval_ms'],
-                consumeArgs: ConsumeArgs::create(
-                    memoryLimit: $consumeArgs['memory_limit'],
-                    timeLimit: $consumeArgs['time_limit'],
-                    limit: $consumeArgs['limit'],
-                    sleep: $consumeArgs['sleep'],
-                    queues: $consumeArgs['queues'],
-                    extra: $consumeArgs['extra'],
-                ),
-            );
+        $totalWorkers = 0;
+        $transports = [];
+        foreach ($this->pools as $pool) {
+            $totalWorkers += $pool->activeWorkerCount();
+            $transports[] = $pool->transport();
         }
 
-        return $configs;
-    }
-
-    public function run(LoopInterface $loop): int
-    {
-        $shutdownState = new ShutdownState();
-        $workers = $this->initializeWorkers();
-        $totalWorkerCount = count($workers);
-
         $this->logger->info('Process manager server started.', [
-            'workers' => $totalWorkerCount,
-            'transports' => array_map(
-                static fn(TransportConfig $config): string => $config->transport,
-                $this->resolvedTransportConfigs,
-            ),
+            'workers' => $totalWorkers,
+            'transports' => $transports,
         ]);
 
-        $loop->addSignal(SIGTERM, function () use ($shutdownState): void {
-            $shutdownState->request(ShutdownReason::SIGNAL, (float) $this->clock->now()->format('U.u'));
-        });
-
         $intervalSec = $this->getMinPollIntervalMicroseconds() / 1_000_000;
-        $exitCode = Command::SUCCESS;
 
-        $loop->addPeriodicTimer($intervalSec, function (TimerInterface $timer) use ($loop, &$workers, $shutdownState, &$exitCode): void {
-            $result = $this->tick($workers, $shutdownState);
+        $this->loop->addPeriodicTimer($intervalSec, function () use ($intervalSec): void {
+            unset($intervalSec);
+            $result = $this->tick();
 
             if ($result !== null) {
-                $exitCode = $result;
-                $loop->cancelTimer($timer);
-                $loop->stop();
+                $this->shutdownState->setExitCode($result);
+                $this->loop->stop();
             }
         });
-
-        $loop->run();
-
-        return $exitCode;
     }
 
-    /**
-     * @param list<array{WorkerState, TransportConfig}> $workers
-     */
-    public function tick(array &$workers, ShutdownState $shutdownState): ?int
+    public function tick(): ?int
     {
-        $this->metrics->setGauge('process_manager_running', $shutdownState->isRequested() ? 0.0 : 1.0, 'Whether the process manager is running');
+        $this->metrics->setGauge('process_manager_running', $this->shutdownState->isRequested() ? 0.0 : 1.0, 'Whether the process manager is running');
 
         $now = (float) $this->clock->now()->format('U.u');
 
-        foreach ($workers as [$worker, $config]) {
-            if (!$shutdownState->isRequested() && $worker->shouldStart($now)) {
-                $this->startWorker($worker, $config);
-                continue;
-            }
-
-            if (!$worker->hasProcess()) {
-                continue;
-            }
-
-            if ($worker->isRunning()) {
-                $this->dispatchIpcMessages($worker, $config, $now);
-                $this->handleRunningWorker($worker, $shutdownState);
-                continue;
-            }
-
-            $this->handleWorkerExit($worker, $config, $shutdownState, $now);
+        if ($this->shutdownState->isRequested()) {
+            $this->ensureAllPoolsDraining();
         }
 
-        if (!$shutdownState->isRequested()) {
+        foreach ($this->pools as $pool) {
+            $this->tickPool($pool, $now);
+            $pool->reapDrained();
+        }
+
+        if (!$this->shutdownState->isRequested()) {
             $this->maybeSendPing();
         }
 
-        if ($shutdownState->isRequested() && !$shutdownState->isSigkillSent()) {
-            $this->escalateToSigkill($workers, $shutdownState, $now);
+        if ($this->shutdownState->isRequested() && !$this->shutdownState->isSigkillSent()) {
+            $this->escalateToSigkill($now);
         }
 
-        if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
+        if ($this->shutdownState->isRequested() && $this->allWorkersStopped()) {
             $this->logger->info('Process manager shutting down.', [
-                'reason' => $shutdownState->getReason()?->value ?? 'completed',
+                'reason' => $this->shutdownState->getReason()?->value ?? 'completed',
             ]);
             return Command::SUCCESS;
         }
@@ -193,22 +104,41 @@ final class ProcessManagerLoop
         return null;
     }
 
-    /**
-     * @return list<array{WorkerState, TransportConfig}>
-     */
-    public function initializeWorkers(): array
+    private function tickPool(WorkerPool $pool, float $now): void
     {
-        $workers = [];
-        $workerId = 1;
+        $config = $pool->config;
 
-        foreach ($this->resolvedTransportConfigs as $config) {
-            for ($i = 0; $i < $config->processes; $i++) {
-                $workers[] = [WorkerState::create($workerId), $config];
-                $workerId++;
-            }
+        foreach ($pool->workers() as $worker) {
+            $this->tickWorker($worker, $config, $now, draining: false);
         }
 
-        return $workers;
+        foreach ($pool->drainingWorkers() as $worker) {
+            $this->tickWorker($worker, $config, $now, draining: true);
+        }
+    }
+
+    private function tickWorker(WorkerState $worker, TransportConfig $config, float $now, bool $draining): void
+    {
+        if (!$draining && !$this->shutdownState->isRequested() && $worker->shouldStart($now)) {
+            $this->startWorker($worker, $config);
+            return;
+        }
+
+        if (!$worker->hasProcess()) {
+            return;
+        }
+
+        if ($worker->isRunning()) {
+            $this->dispatchIpcMessages($worker, $config, $now);
+
+            if ($draining || $this->shutdownState->isRequested()) {
+                $this->sendStopSignal($worker);
+            }
+
+            return;
+        }
+
+        $this->handleWorkerExit($worker, $config, $now, $draining);
     }
 
     private function startWorker(WorkerState $worker, TransportConfig $config): void
@@ -238,20 +168,22 @@ final class ProcessManagerLoop
         ]);
     }
 
-    private function handleRunningWorker(WorkerState $worker, ShutdownState $shutdownState): void
+    private function sendStopSignal(WorkerState $worker): void
     {
-        if ($shutdownState->isRequested() && !$worker->isStopSignalSent()) {
-            $worker->markStopSignalSent();
-            $worker->getProcess()->signal(SIGTERM);
-            $this->logger->info('Sent SIGTERM to worker.', ['worker' => $worker->id]);
+        if ($worker->isStopSignalSent()) {
+            return;
         }
+
+        $worker->markStopSignalSent();
+        $worker->getProcess()->signal(SIGTERM);
+        $this->logger->info('Sent SIGTERM to worker.', ['worker' => $worker->id]);
     }
 
     private function handleWorkerExit(
         WorkerState $worker,
         TransportConfig $config,
-        ShutdownState $shutdownState,
         float $now,
+        bool $draining,
     ): void {
         $exitCode = $worker->getProcess()->getExitCode();
         $pid = $worker->getProcess()->getPid();
@@ -260,6 +192,9 @@ final class ProcessManagerLoop
         $worker->getInputStream()?->close();
         $worker->clearInputStream();
         $worker->clearProcess();
+
+        $this->metrics->removeGauge('worker_last_pong_timestamp', ['worker' => (string) $worker->id]);
+        $this->metrics->removeGauge('worker_busy', ['worker' => (string) $worker->id, 'transport' => $config->transport]);
 
         $exitCode = $exitCode ?? 1;
         $this->logger->info('Worker exited.', [
@@ -270,7 +205,7 @@ final class ProcessManagerLoop
         ]);
         $this->metrics->incrementCounter('worker_exits', 'Total number of worker exits', ['exit_code' => (string) $exitCode]);
 
-        if ($shutdownState->isRequested()) {
+        if ($draining || $this->shutdownState->isRequested()) {
             $worker->markStopped();
             return;
         }
@@ -291,7 +226,7 @@ final class ProcessManagerLoop
                 'worker' => $worker->id,
                 'transport' => $config->transport,
             ]);
-            $shutdownState->request(ShutdownReason::FAILURE_LIMIT, $now);
+            $this->shutdownState->request(ShutdownReason::FAILURE_LIMIT, $now);
             $worker->markStopped();
             return;
         }
@@ -340,9 +275,45 @@ final class ProcessManagerLoop
             return;
         }
 
-        if ($message instanceof ProcessedCommandMessage && $message->status === 'handled') {
-            $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $config->transport]);
+        if ($message instanceof WorkerStartedHandlingMessage) {
+            $worker->markBusy();
+            $this->metrics->setGauge(
+                'worker_busy',
+                1.0,
+                'Whether worker is currently busy',
+                ['worker' => (string) $worker->id, 'transport' => $config->transport],
+            );
+
+            return;
         }
+
+        if ($message instanceof ProcessedCommandMessage) {
+            $worker->markIdle();
+            $this->metrics->setGauge(
+                'worker_busy',
+                0.0,
+                'Whether worker is currently busy',
+                ['worker' => (string) $worker->id, 'transport' => $config->transport],
+            );
+
+            $pool = $this->findPool($config->transport);
+            $pool?->recordMessageProcessed();
+
+            if ($message->status === 'handled') {
+                $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $config->transport]);
+            }
+        }
+    }
+
+    private function findPool(string $transport): ?WorkerPool
+    {
+        foreach ($this->pools as $pool) {
+            if ($pool->transport() === $transport) {
+                return $pool;
+            }
+        }
+
+        return null;
     }
 
     private function maybeSendPing(): void
@@ -355,16 +326,22 @@ final class ProcessManagerLoop
         }
     }
 
-    /**
-     * @param list<array{WorkerState, TransportConfig}> $workers
-     */
-    private function escalateToSigkill(array $workers, ShutdownState $shutdownState, float $now): void
+    private function ensureAllPoolsDraining(): void
+    {
+        foreach ($this->pools as $pool) {
+            if ($pool->activeWorkerCount() > 0) {
+                $pool->drainAll();
+            }
+        }
+    }
+
+    private function escalateToSigkill(float $now): void
     {
         if ($this->shutdownTimeoutSeconds === null) {
             return;
         }
 
-        $requestedAt = $shutdownState->getRequestedAt();
+        $requestedAt = $this->shutdownState->getRequestedAt();
         if ($requestedAt === null) {
             return;
         }
@@ -373,30 +350,31 @@ final class ProcessManagerLoop
             return;
         }
 
-        $shutdownState->markSigkillSent();
+        $this->shutdownState->markSigkillSent();
 
-        foreach ($workers as [$worker]) {
-            if (!$worker->isRunning()) {
-                continue;
+        foreach ($this->pools as $pool) {
+            foreach ($pool->allWorkers() as $worker) {
+                if (!$worker->isRunning()) {
+                    continue;
+                }
+
+                $worker->getProcess()->signal(SIGKILL);
+                $this->metrics->incrementCounter('worker_sigkills', 'Total number of SIGKILLs sent to workers');
+                $this->logger->warning('Sent SIGKILL to worker after shutdown timeout.', [
+                    'worker' => $worker->id,
+                    'timeout_seconds' => $this->shutdownTimeoutSeconds,
+                ]);
             }
-
-            $worker->getProcess()->signal(SIGKILL);
-            $this->metrics->incrementCounter('worker_sigkills', 'Total number of SIGKILLs sent to workers');
-            $this->logger->warning('Sent SIGKILL to worker after shutdown timeout.', [
-                'worker' => $worker->id,
-                'timeout_seconds' => $this->shutdownTimeoutSeconds,
-            ]);
         }
     }
 
-    /**
-     * @param list<array{WorkerState, TransportConfig}> $workers
-     */
-    private function allWorkersStopped(array $workers): bool
+    private function allWorkersStopped(): bool
     {
-        foreach ($workers as [$worker]) {
-            if ($worker->hasProcess()) {
-                return false;
+        foreach ($this->pools as $pool) {
+            foreach ($pool->allWorkers() as $worker) {
+                if ($worker->hasProcess()) {
+                    return false;
+                }
             }
         }
 
@@ -407,8 +385,12 @@ final class ProcessManagerLoop
     {
         $minMs = PHP_INT_MAX;
 
-        foreach ($this->resolvedTransportConfigs as $config) {
-            $minMs = min($minMs, $config->pollIntervalMs);
+        foreach ($this->pools as $pool) {
+            $minMs = min($minMs, $pool->config->pollIntervalMs);
+        }
+
+        if ($minMs === PHP_INT_MAX) {
+            $minMs = 200;
         }
 
         return $minMs * 1000;
