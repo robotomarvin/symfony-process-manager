@@ -67,7 +67,7 @@ final class SymfonyProcessManagerExtension extends Extension
     }
 
     /**
-     * @param array<string, array{processes: ?int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, autoscaler?: array{min: int, max: int, priority: int, smoothing_window_sec: int, scale_up_cooldown_sec: int, scale_down_cooldown_sec: int, scale_up_step: int, scale_down_step: int, strategy: array{type: string, target?: ?float, id?: ?string}}, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}> $transports
+     * @param array<string, array{processes: ?int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, autoscaler?: array{min: int, max: int, priority: int, smoothing_window_sec: int, scale_up_cooldown_sec: int, scale_down_cooldown_sec: int, scale_up_step: int, scale_down_step: int, strategy: array{type: string, target?: ?float, scale_up_threshold?: ?float, scale_down_threshold?: ?float, id?: ?string}}, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}> $transports
      * @return list<Reference>
      */
     private function buildPoolDefinitions(ContainerBuilder $container, array $transports): array
@@ -139,7 +139,7 @@ final class SymfonyProcessManagerExtension extends Extension
     }
 
     /**
-     * @param array{type: string, target?: ?float, id?: ?string} $strategy
+     * @param array{type: string, target?: ?float, scale_up_threshold?: ?float, scale_down_threshold?: ?float, id?: ?string} $strategy
      */
     private function buildStrategyConfigDef(array $strategy, int $minWorkers): Definition
     {
@@ -149,6 +149,12 @@ final class SymfonyProcessManagerExtension extends Extension
 
         if ($type === 'utilization') {
             $params['target'] = $strategy['target'] ?? 0.7;
+            if (isset($strategy['scale_up_threshold'])) {
+                $params['scale_up_threshold'] = $strategy['scale_up_threshold'];
+            }
+            if (isset($strategy['scale_down_threshold'])) {
+                $params['scale_down_threshold'] = $strategy['scale_down_threshold'];
+            }
         }
 
         if ($type === 'service') {

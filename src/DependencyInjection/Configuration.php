@@ -68,6 +68,8 @@ final class Configuration implements ConfigurationInterface
                                         ->children()
                                             ->scalarNode('type')->isRequired()->end()
                                             ->floatNode('target')->defaultNull()->end()
+                                            ->floatNode('scale_up_threshold')->defaultNull()->min(0.0)->max(1.0)->end()
+                                            ->floatNode('scale_down_threshold')->defaultNull()->min(0.0)->max(1.0)->end()
                                             ->scalarNode('id')->defaultNull()->end()
                                         ->end()
                                         ->validate()
@@ -82,6 +84,14 @@ final class Configuration implements ConfigurationInterface
                                                 return ($v['type'] ?? null) === 'service' && empty($v['id']);
                                             })
                                             ->thenInvalid('Strategy type "service" requires an "id".')
+                                        ->end()
+                                        ->validate()
+                                            ->ifTrue(static function (array $v): bool {
+                                                $up = $v['scale_up_threshold'] ?? null;
+                                                $down = $v['scale_down_threshold'] ?? null;
+                                                return $up !== null && $down !== null && $down > $up;
+                                            })
+                                            ->thenInvalid('strategy.scale_down_threshold must be <= scale_up_threshold.')
                                         ->end()
                                     ->end()
                                 ->end()

@@ -31,14 +31,19 @@ interface ScalingStrategyInterface {
 }
 ```
 
-`PoolSnapshot` carries smoothed values for `busyWorkers`, `idleWorkers`, `throughputPerSecond`, current/min/max, time since last scale event, and recent failure count. Strategies do **not** know about cooldowns, step caps, or history — those concerns live in the pool's stability layer.
+`PoolSnapshot` carries smoothed values for `busyWorkers`, `idleWorkers`, `throughputPerSecond`, current/min/max, time since last scale event, and recent failure count. `busyWorkers` and `idleWorkers` are floats (raw EWMA output), so a worker that is busy half the time appears as `0.5` rather than rounding to `0` or `1` — this is what keeps `utilization` strategies stable under bursty traffic. Strategies do **not** know about cooldowns, step caps, or history — those concerns live in the pool's stability layer.
 
 A strategy may return any non-negative integer; the pool is responsible for clamping into `[min, max]`.
 
 ### Built-in strategies
 
 - **`fixed`** — returns the configured count always. Used as the implicit fallback when a transport has no `autoscaler` block (count = `processes`).
-- **`utilization`** — returns `ceil(busy / target)`. With `target = 0.7`, the pool aims to keep utilization at 70%.
+- **`utilization`** — applies hysteresis around target utilization. Computes `util = busy / max(1, current)` and:
+  - if `util > scale_up_threshold`, returns `ceil(busy / target)` (under-provisioned, ask for more);
+  - if `util < scale_down_threshold`, returns `ceil(busy / target)` (over-provisioned, ask for less);
+  - otherwise returns `current` (within deadband — hold).
+
+  Defaults: `scale_up_threshold = target`, `scale_down_threshold = target × 0.5`. Without a deadband, EWMA noise around the target causes flapping; the deadband + smoothing + cooldowns are layered defences.
 - **`service`** — references a custom strategy service via `strategy.id`. The service must implement `ScalingStrategyInterface`.
 
 ## Stability layer (WorkerPool)

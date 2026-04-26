@@ -59,6 +59,27 @@ final class UtilizationStrategyTest extends TestCase
         self::assertSame(2, $strategy->decide($this->snapshotAt(current: 1, busy: 0.6)));
     }
 
+    public function testDeadbandHoldsCurrentBetweenThresholds(): void
+    {
+        $strategy = new UtilizationStrategy(
+            target: 0.7,
+            scaleUpThreshold: 0.7,
+            scaleDownThreshold: 0.2,
+        );
+
+        // util = 0.5 / 1 = 0.5 → between thresholds → hold at current=1
+        self::assertSame(1, $strategy->decide($this->snapshotAt(current: 1, busy: 0.5)));
+
+        // util = 1.4 / 2 = 0.7 → at the boundary, strict > so still in band → hold at 2
+        self::assertSame(2, $strategy->decide($this->snapshotAt(current: 2, busy: 1.4)));
+
+        // util = 1.5 / 2 = 0.75 > 0.7 → scale up; ceil(1.5 / 0.7) = 3
+        self::assertSame(3, $strategy->decide($this->snapshotAt(current: 2, busy: 1.5)));
+
+        // util = 0.3 / 2 = 0.15 < 0.2 → scale down; ceil(0.3 / 0.7) = 1
+        self::assertSame(1, $strategy->decide($this->snapshotAt(current: 2, busy: 0.3)));
+    }
+
     private function snapshot(float $busy): PoolSnapshot
     {
         // Existing tests assume busy >> currentWorkers (saturated regime),

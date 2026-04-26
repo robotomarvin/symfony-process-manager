@@ -14,7 +14,11 @@ final class StrategyRegistry
     {
         return match ($config->type) {
             'fixed' => new FixedStrategy($this->intParam($config->params, 'count')),
-            'utilization' => new UtilizationStrategy($this->floatParam($config->params, 'target', 0.7)),
+            'utilization' => new UtilizationStrategy(
+                target: $this->floatParam($config->params, 'target', 0.7),
+                scaleUpThreshold: $this->optionalFloatParam($config->params, 'scale_up_threshold'),
+                scaleDownThreshold: $this->optionalFloatParam($config->params, 'scale_down_threshold'),
+            ),
             'service' => $this->resolveService($config->serviceId),
             default => throw new \InvalidArgumentException(sprintf('Unknown strategy type: %s', $config->type)),
         };
@@ -59,6 +63,28 @@ final class StrategyRegistry
     private function floatParam(array $params, string $key, float $default): float
     {
         $value = $params[$key] ?? $default;
+
+        if (is_int($value)) {
+            return (float) $value;
+        }
+
+        if (!is_float($value)) {
+            throw new \InvalidArgumentException(sprintf('Strategy param "%s" must be numeric', $key));
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function optionalFloatParam(array $params, string $key): ?float
+    {
+        $value = $params[$key] ?? null;
+
+        if ($value === null) {
+            return null;
+        }
 
         if (is_int($value)) {
             return (float) $value;
