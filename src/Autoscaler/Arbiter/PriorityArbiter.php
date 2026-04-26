@@ -24,17 +24,23 @@ final class PriorityArbiter
     public function allocate(array $desired, array $pools): array
     {
         $allocated = [];
-        $remaining = $this->totalCap;
+        $minSum = 0;
 
         foreach ($pools as $transport => $pool) {
-            $allocated[$transport] = $pool->config->autoscaler->min;
-            $remaining -= $pool->config->autoscaler->min;
+            $min = $pool->config->autoscaler->min;
+            $allocated[$transport] = $min;
+            $minSum += $min;
         }
 
-        if ($remaining < 0) {
-            // Impossible by configuration validation, but be safe.
-            $remaining = 0;
+        if ($minSum > $this->totalCap) {
+            throw new \LogicException(sprintf(
+                'PriorityArbiter: sum of pool minimums (%d) exceeds total_cap (%d).',
+                $minSum,
+                $this->totalCap,
+            ));
         }
+
+        $remaining = $this->totalCap - $minSum;
 
         $groups = $this->groupByPriorityDesc($pools);
 

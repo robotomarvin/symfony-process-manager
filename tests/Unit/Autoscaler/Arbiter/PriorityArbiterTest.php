@@ -105,6 +105,19 @@ final class PriorityArbiterTest extends TestCase
         self::assertSame(['a' => 2, 'b' => 2], $allocated);
     }
 
+    public function testThrowsWhenSumOfMinimumsExceedsCap(): void
+    {
+        $a = $this->makePool('a', min: 3, max: 5, priority: 0);
+        $b = $this->makePool('b', min: 3, max: 5, priority: 0);
+
+        $arbiter = new PriorityArbiter(5);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('sum of pool minimums (6) exceeds total_cap (5)');
+
+        $arbiter->allocate(['a' => 3, 'b' => 3], ['a' => $a, 'b' => $b]);
+    }
+
     private function makePool(string $name, int $min, int $max, int $priority): WorkerPool
     {
         $autoscaler = new AutoscalerConfig(
