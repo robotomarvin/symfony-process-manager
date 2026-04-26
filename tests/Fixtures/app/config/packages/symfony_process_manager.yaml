@@ -18,9 +18,9 @@ symfony_process_manager:
                 max: 3
                 smoothing_window_sec: 2
                 scale_up_cooldown_sec: 1
-                scale_down_cooldown_sec: 2
+                scale_down_cooldown_sec: 8
                 scale_up_step: 2
-                scale_down_step: 3
+                scale_down_step: 1
                 strategy:
                     type: utilization
                     target: 0.7
