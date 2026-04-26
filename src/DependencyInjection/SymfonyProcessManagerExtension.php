@@ -14,6 +14,7 @@ use Symfony\Component\DependencyInjection\Reference;
 use SymfonyProcessManager\Autoscaler\Arbiter\PriorityArbiter;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Autoscaler\AutoscalerLoop;
+use SymfonyProcessManager\Autoscaler\Strategy\ScalingStrategyInterface;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyRegistry;
 use SymfonyProcessManager\Http\HttpServer;
@@ -24,10 +25,15 @@ use SymfonyProcessManager\Transport\TransportConfig;
 
 final class SymfonyProcessManagerExtension extends Extension
 {
+    public const PARAM_REQUIRED_STRATEGY_SERVICES = 'symfony_process_manager.required_scaling_strategy_services';
+
     public function load(array $configs, ContainerBuilder $container): void
     {
         $loader = new YamlFileLoader($container, new FileLocator(__DIR__ . '/../Resources/config'));
         $loader->load('services.yaml');
+
+        $container->registerForAutoconfiguration(ScalingStrategyInterface::class)
+            ->addTag(ScalingStrategyInterface::TAG);
 
         $config = $this->processConfiguration(new Configuration(), $configs);
 
@@ -53,13 +59,15 @@ final class SymfonyProcessManagerExtension extends Extension
             $container->removeDefinition(PriorityArbiter::class);
         }
 
-        $serviceStrategyIds = $this->collectServiceStrategyIds($config['transports']);
+        $strategyServiceMap = $this->collectServiceStrategyMap($config['transports']);
         $strategyLocatorRefs = [];
-        foreach ($serviceStrategyIds as $serviceId) {
+        foreach (array_keys($strategyServiceMap) as $serviceId) {
             $strategyLocatorRefs[$serviceId] = new Reference($serviceId);
         }
         $container->getDefinition(StrategyRegistry::class)
             ->setArgument('$serviceLocator', new ServiceLocatorArgument($strategyLocatorRefs));
+
+        $container->setParameter(self::PARAM_REQUIRED_STRATEGY_SERVICES, $strategyServiceMap);
 
         $container->getDefinition(HttpServer::class)
             ->setArgument('$host', $config['http_server']['host'])
@@ -173,12 +181,12 @@ final class SymfonyProcessManagerExtension extends Extension
 
     /**
      * @param array<string, array{autoscaler?: array{strategy: array{type: string, id?: ?string}}}> $transports
-     * @return list<string>
+     * @return array<string, list<string>> Map of service ID to the transports that reference it.
      */
-    private function collectServiceStrategyIds(array $transports): array
+    private function collectServiceStrategyMap(array $transports): array
     {
-        $ids = [];
-        foreach ($transports as $transport) {
+        $map = [];
+        foreach ($transports as $transportName => $transport) {
             $strategy = $transport['autoscaler']['strategy'] ?? null;
             if (!is_array($strategy)) {
                 continue;
@@ -190,10 +198,10 @@ final class SymfonyProcessManagerExtension extends Extension
             if ($serviceId === null || $serviceId === '') {
                 continue;
             }
-            $ids[] = $serviceId;
+            $map[$serviceId][] = $transportName;
         }
 
-        return array_values(array_unique($ids));
+        return $map;
     }
 
     public function getAlias(): string
