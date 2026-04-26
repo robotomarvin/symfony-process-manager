@@ -297,14 +297,14 @@ final class WorkerPool
                 $this->draining[] = $worker;
             }
 
-            $picked_ids = [];
+            $pickedIds = [];
             foreach ($picked as $w) {
-                $picked_ids[$w->id] = true;
+                $pickedIds[$w->id] = true;
             }
 
             $this->workers = array_values(array_filter(
                 $this->workers,
-                static fn(WorkerState $w) => !isset($picked_ids[$w->id]),
+                static fn(WorkerState $w) => !isset($pickedIds[$w->id]),
             ));
         }
     }
