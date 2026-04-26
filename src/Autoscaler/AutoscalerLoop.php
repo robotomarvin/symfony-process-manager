@@ -90,8 +90,8 @@ final class AutoscalerLoop
     private function buildSnapshot(WorkerPool $pool, float $now): PoolSnapshot
     {
         $auto = $pool->config->autoscaler;
-        $secondsSinceLastScaleUp = $pool->lastScaledUpAt() === 0.0 ? PHP_INT_MAX : $now - $pool->lastScaledUpAt();
-        $secondsSinceLastScaleDown = $pool->lastScaledDownAt() === 0.0 ? PHP_INT_MAX : $now - $pool->lastScaledDownAt();
+        $lastUp = $pool->lastScaledUpAt();
+        $lastDown = $pool->lastScaledDownAt();
 
         return new PoolSnapshot(
             transport: $pool->transport(),
@@ -102,8 +102,8 @@ final class AutoscalerLoop
             queueDepth: null,
             min: $auto->min,
             max: $auto->max,
-            secondsSinceLastScaleUp: (float) $secondsSinceLastScaleUp,
-            secondsSinceLastScaleDown: (float) $secondsSinceLastScaleDown,
+            secondsSinceLastScaleUp: $lastUp === 0.0 ? null : $now - $lastUp,
+            secondsSinceLastScaleDown: $lastDown === 0.0 ? null : $now - $lastDown,
             recentFailureCount: $pool->recentFailureCount(),
         );
     }

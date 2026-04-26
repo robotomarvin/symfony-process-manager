@@ -15,8 +15,8 @@ final readonly class PoolSnapshot
         public ?int $queueDepth,
         public int $min,
         public int $max,
-        public float $secondsSinceLastScaleUp,
-        public float $secondsSinceLastScaleDown,
+        public ?float $secondsSinceLastScaleUp,
+        public ?float $secondsSinceLastScaleDown,
         public int $recentFailureCount,
     ) {}
 }
