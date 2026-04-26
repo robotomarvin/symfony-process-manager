@@ -233,6 +233,33 @@ final class WorkerPoolTest extends TestCase
         self::assertSame(0, $pool->idleWorkerCount(), 'idleWorkerCount() reflects active pool only');
     }
 
+    public function testDrainingWorkerBusyIdleTransitionsAreHonoured(): void
+    {
+        // Symfony Messenger's consume loop checks shouldStop only between messages, so a
+        // worker can pick up one more message between drain entry and SIGTERM delivery.
+        // Per spec/autoscaler.md, the resulting busy/idle transitions are honoured and
+        // reflected in busyWorkerCount(); the strategy view (activeBusyWorkerCount) is
+        // unaffected because draining workers are not in $workers anymore.
+        $pool = $this->buildPool(min: 1, max: 5);
+        $pool->setTarget(2, 100.0);
+        foreach ($pool->workers() as $worker) {
+            $worker->markIdle();
+        }
+
+        $pool->drainAll();
+        $draining = $pool->drainingWorkers();
+        self::assertCount(2, $draining);
+
+        // Late WorkerStartedHandlingMessage arrives for a draining worker.
+        $draining[0]->markBusy();
+        self::assertSame(1, $pool->busyWorkerCount(), 'ground-truth gauge reflects late busy transition');
+        self::assertSame(0, $pool->activeBusyWorkerCount(), 'strategy view never sees draining workers');
+
+        // Subsequent ProcessedCommandMessage flips it back.
+        $draining[0]->markIdle();
+        self::assertSame(0, $pool->busyWorkerCount(), 'ground-truth gauge follows worker until exit');
+    }
+
     private function buildPool(
         int $min,
         int $max,
