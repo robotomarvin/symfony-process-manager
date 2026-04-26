@@ -144,6 +144,69 @@ final class AutoscalerTest extends TestCase
         }
     }
 
+    public function testAutoscalerHonorsScaleDownCooldownBetweenSteps(): void
+    {
+        // The fixture's scalable pool is configured with:
+        //   scale_down_step: 1, scale_down_cooldown_sec: 8
+        // so a pool that reached the max of 3 workers must shed them one at
+        // a time, leaving at least ~8 seconds between consecutive scale-down
+        // events. This test pushes the pool to its max, lets the queue drain,
+        // and verifies that gap.
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $this->waitForHttpAddress($session);
+
+            $session->waitForRecord(
+                static fn(array $r): bool => $r['message'] === 'Worker started.'
+                    && ($r['context']['transport'] ?? null) === 'scalable',
+                5.0,
+            );
+
+            // Sustained load so the pool climbs all the way to max (3).
+            $this->dispatchScalableMessages(count: 10, sleep: 2.0);
+
+            $session->waitForRecord(
+                static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
+                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['target'] ?? null) === 3,
+                20.0,
+            );
+
+            // Once the queue drains, first scale-down step should be 3 → 2.
+            $firstDown = $session->waitForRecord(
+                static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
+                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['direction'] ?? null) === 'down',
+                30.0,
+            );
+            $firstDownAt = microtime(true);
+            self::assertSame(2, $firstDown['context']['target'] ?? null, 'first scale-down step should be 3 → 2 (scale_down_step=1)');
+
+            // Second scale-down step should be 2 → 1, and must wait for the cooldown.
+            $secondDown = $session->waitForRecord(
+                static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
+                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['direction'] ?? null) === 'down',
+                20.0,
+            );
+            $secondDownAt = microtime(true);
+            self::assertSame(1, $secondDown['context']['target'] ?? null, 'second scale-down step should be 2 → 1');
+
+            $cooldownGap = $secondDownAt - $firstDownAt;
+            // Fixture sets scale_down_cooldown_sec = 8s. Allow ~1s slack for
+            // poll latency in waitForRecord (100ms tick).
+            self::assertGreaterThanOrEqual(
+                7.0,
+                $cooldownGap,
+                sprintf('expected ≥7s between scale-down events (cooldown=8s); got %.2fs', $cooldownGap),
+            );
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     public function testAutoscalerExposesBusyAndUnmetDemandMetrics(): void
     {
         $runner = new ConsoleProcessRunner();
