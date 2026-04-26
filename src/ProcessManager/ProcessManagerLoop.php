@@ -57,6 +57,7 @@ final class ProcessManagerLoop
         private readonly MetricsRegistry $metrics,
         private readonly IpcFanout $ipcFanout,
         private readonly WorkerContextInterface $workerContext,
+        private readonly ?int $shutdownTimeoutSeconds = 30,
         private readonly int $pingIntervalTicks = 50,
     ) {
         $this->resolvedTransportConfigs = self::buildTransportConfigs($transportConfigs);
@@ -124,8 +125,8 @@ final class ProcessManagerLoop
             ),
         ]);
 
-        $loop->addSignal(SIGTERM, static function () use ($shutdownState): void {
-            $shutdownState->request(ShutdownReason::SIGNAL);
+        $loop->addSignal(SIGTERM, function () use ($shutdownState): void {
+            $shutdownState->request(ShutdownReason::SIGNAL, (float) $this->clock->now()->format('U.u'));
         });
 
         $intervalSec = $this->getMinPollIntervalMicroseconds() / 1_000_000;
@@ -176,6 +177,10 @@ final class ProcessManagerLoop
 
         if (!$shutdownState->isRequested()) {
             $this->maybeSendPing();
+        }
+
+        if ($shutdownState->isRequested() && !$shutdownState->isSigkillSent()) {
+            $this->escalateToSigkill($workers, $shutdownState, $now);
         }
 
         if ($shutdownState->isRequested() && $this->allWorkersStopped($workers)) {
@@ -286,7 +291,7 @@ final class ProcessManagerLoop
                 'worker' => $worker->id,
                 'transport' => $config->transport,
             ]);
-            $shutdownState->request(ShutdownReason::FAILURE_LIMIT);
+            $shutdownState->request(ShutdownReason::FAILURE_LIMIT, $now);
             $worker->markStopped();
             return;
         }
@@ -347,6 +352,40 @@ final class ProcessManagerLoop
         if ($this->ticksSinceLastPing >= $this->pingIntervalTicks) {
             $this->ticksSinceLastPing = 0;
             $this->ipcFanout->send(new PingMessage());
+        }
+    }
+
+    /**
+     * @param list<array{WorkerState, TransportConfig}> $workers
+     */
+    private function escalateToSigkill(array $workers, ShutdownState $shutdownState, float $now): void
+    {
+        if ($this->shutdownTimeoutSeconds === null) {
+            return;
+        }
+
+        $requestedAt = $shutdownState->getRequestedAt();
+        if ($requestedAt === null) {
+            return;
+        }
+
+        if ($now - $requestedAt < $this->shutdownTimeoutSeconds) {
+            return;
+        }
+
+        $shutdownState->markSigkillSent();
+
+        foreach ($workers as [$worker]) {
+            if (!$worker->isRunning()) {
+                continue;
+            }
+
+            $worker->getProcess()->signal(SIGKILL);
+            $this->metrics->incrementCounter('worker_sigkills', 'Total number of SIGKILLs sent to workers');
+            $this->logger->warning('Sent SIGKILL to worker after shutdown timeout.', [
+                'worker' => $worker->id,
+                'timeout_seconds' => $this->shutdownTimeoutSeconds,
+            ]);
         }
     }
 

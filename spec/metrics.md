@@ -104,6 +104,22 @@ Incremented when a failure is recorded but the failure limit is not yet reached 
 
 ---
 
+### `worker_sigkills_total`
+
+**Type:** Counter  
+**Labels:** none  
+**Description:** Total number of SIGKILLs sent to workers after `shutdown_timeout` elapsed during graceful shutdown.
+
+```
+# HELP worker_sigkills_total Total number of SIGKILLs sent to workers
+# TYPE worker_sigkills_total counter
+worker_sigkills_total 1
+```
+
+Only emitted when at least one worker fails to exit within `shutdown_timeout` seconds after SIGTERM. Use this as a signal that workers are not draining cleanly.
+
+---
+
 ### `worker_last_pong_timestamp`
 
 **Type:** Gauge  

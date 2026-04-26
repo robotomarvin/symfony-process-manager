@@ -2,9 +2,9 @@
 
 ## Overview
 
-The process manager supports a single shutdown path: **graceful drain**. All workers are sent SIGTERM and the loop continues until every worker has exited.
+The process manager supports two shutdown phases: **graceful drain** followed by an optional **forced kill**. All workers are first sent SIGTERM. If they have not exited within the configured `shutdown_timeout`, SIGKILL is sent to any worker still running.
 
-There is no hard kill (SIGKILL) or timeout — the loop waits indefinitely for workers to exit. Workers are expected to complete their current message and exit cleanly.
+Setting `shutdown_timeout: 0` disables the SIGKILL escalation and the loop waits indefinitely for workers to exit.
 
 ---
 
@@ -41,10 +41,15 @@ final class ShutdownState
 {
     private bool $requested = false;
     private ?ShutdownReason $reason = null;
+    private ?float $requestedAt = null;
+    private bool $sigkillSent = false;
 
-    public function request(ShutdownReason $reason): void;  // idempotent: first caller wins
+    public function request(ShutdownReason $reason, float $now): void;  // idempotent: first caller wins
     public function isRequested(): bool;
     public function getReason(): ?ShutdownReason;
+    public function getRequestedAt(): ?float;
+    public function isSigkillSent(): bool;
+    public function markSigkillSent(): void;
 }
 ```
 
@@ -81,6 +86,12 @@ enum ShutdownReason
         ├─ Symfony Messenger catches SIGTERM
         ├─ finishes current message (if any)
         └─ exits (code 0 if clean, non-zero if mid-message error)
+
+3a. (Optional) SIGKILL escalation
+    └─ if shutdown_timeout > 0 and (now - requestedAt) >= shutdown_timeout:
+         ├─ for each worker still running: send SIGKILL
+         ├─ ShutdownState::markSigkillSent() (one-shot guard)
+         └─ worker_sigkills_total counter incremented per kill
 
 4. Tick loop continues
    └─ for each exited worker:
@@ -128,7 +139,7 @@ If a second SIGTERM is received while draining:
 - The SIGTERM was already forwarded to workers on the first shutdown tick.
 - No second SIGTERM is sent to workers.
 
-If the operator wants to force-kill, they should send SIGKILL directly to the workers or to the manager process (which will orphan workers).
+If the operator wants to force-kill before `shutdown_timeout` elapses, they should send SIGKILL directly to the workers or to the manager process (which will orphan workers).
 
 ---
 

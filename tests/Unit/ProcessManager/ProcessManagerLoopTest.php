@@ -25,6 +25,7 @@ use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
+use SymfonyProcessManager\ProcessManager\ShutdownReason;
 use SymfonyProcessManager\ProcessManager\ShutdownState;
 use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
@@ -639,6 +640,135 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertStringNotContainsString('messages_processed_total', $output);
     }
 
+    public function testSigkillSentAfterShutdownTimeout(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createRunningProcessThatExitsOnSigkill());
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            shutdownTimeoutSeconds: 2,
+        );
+
+        $exitCode = $this->runTicksWithShutdownAt($loop, shutdownAtTick: 1);
+
+        self::assertSame(Command::SUCCESS, $exitCode);
+        self::assertTrue($this->logger->hasMessage('Sent SIGTERM to worker.'));
+        self::assertTrue($this->logger->hasMessage('Sent SIGKILL to worker after shutdown timeout.'));
+        self::assertStringContainsString('worker_sigkills_total', $this->metrics->toPrometheusText());
+    }
+
+    public function testNoSigkillWhenWorkersExitWithinTimeout(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createRunningProcessThatExitsOnSigterm());
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            shutdownTimeoutSeconds: 30,
+        );
+
+        $exitCode = $this->runTicksWithShutdownAt($loop, shutdownAtTick: 1);
+
+        self::assertSame(Command::SUCCESS, $exitCode);
+        self::assertTrue($this->logger->hasMessage('Sent SIGTERM to worker.'));
+        self::assertFalse($this->logger->hasMessage('Sent SIGKILL to worker after shutdown timeout.'));
+        self::assertStringNotContainsString('worker_sigkills_total', $this->metrics->toPrometheusText());
+    }
+
+    public function testNoSigkillWhenTimeoutIsNull(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createPermanentlyStubbornProcess());
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            shutdownTimeoutSeconds: null,
+        );
+
+        $this->runTicksWithShutdownAt($loop, shutdownAtTick: 1, maxTicks: 50, expectTermination: false);
+
+        self::assertFalse($this->logger->hasMessage('Sent SIGKILL to worker after shutdown timeout.'));
+        self::assertStringNotContainsString('worker_sigkills_total', $this->metrics->toPrometheusText());
+    }
+
+    public function testSigkillSentToMultipleRunningWorkers(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createRunningProcessThatExitsOnSigkill());
+        $factory->addProcess($this->createRunningProcessThatExitsOnSigterm());
+        $factory->addProcess($this->createRunningProcessThatExitsOnSigkill());
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(processes: 3),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            shutdownTimeoutSeconds: 2,
+        );
+
+        $exitCode = $this->runTicksWithShutdownAt($loop, shutdownAtTick: 1);
+
+        self::assertSame(Command::SUCCESS, $exitCode);
+
+        $sigkillRecords = array_filter(
+            $this->logger->getRecords(),
+            static fn(array $r): bool => $r['message'] === 'Sent SIGKILL to worker after shutdown timeout.',
+        );
+        self::assertCount(2, $sigkillRecords, 'SIGKILL should be sent only to workers still running');
+    }
+
+    public function testSigkillSentOnlyOnce(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createPermanentlyStubbornProcess());
+
+        $loop = new ProcessManagerLoop(
+            $this->clock,
+            $this->logger,
+            $factory,
+            $this->outputHandler,
+            transportConfigs: self::rawTransportConfigs(),
+            metrics: $this->metrics,
+            ipcFanout: $this->ipcFanout,
+            workerContext: $this->workerContext,
+            shutdownTimeoutSeconds: 1,
+        );
+
+        $this->runTicksWithShutdownAt($loop, shutdownAtTick: 1, maxTicks: 20, expectTermination: false);
+
+        $sigkillRecords = array_filter(
+            $this->logger->getRecords(),
+            static fn(array $r): bool => $r['message'] === 'Sent SIGKILL to worker after shutdown timeout.',
+        );
+        self::assertCount(1, $sigkillRecords, 'SIGKILL must only be sent once even when worker ignores it');
+    }
+
     /**
      * @param array{
      *     memory_limit: int|null,
@@ -723,6 +853,87 @@ final class ProcessManagerLoopTest extends TestCase
         $mock->method('start')->willReturnCallback(function (?callable $callback = null): void {
             // Do nothing - process immediately exits
         });
+
+        return $mock;
+    }
+
+    private function runTicksWithShutdownAt(
+        ProcessManagerLoop $loop,
+        int $shutdownAtTick,
+        int $maxTicks = 100,
+        bool $expectTermination = true,
+    ): ?int {
+        $shutdownState = new ShutdownState();
+        $workers = $loop->initializeWorkers();
+
+        for ($i = 0; $i < $maxTicks; $i++) {
+            if ($i === $shutdownAtTick) {
+                $shutdownState->request(
+                    ShutdownReason::SIGNAL,
+                    (float) $this->clock->now()->format('U.u'),
+                );
+            }
+
+            $result = $loop->tick($workers, $shutdownState);
+
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        if ($expectTermination) {
+            self::fail('Loop did not terminate within ' . $maxTicks . ' ticks');
+        }
+
+        return null;
+    }
+
+    private function createRunningProcessThatExitsOnSigkill(): Process
+    {
+        $state = new \ArrayObject(['running' => true]);
+        $mock = $this->createMock(Process::class);
+        $mock->method('isRunning')->willReturnCallback(static fn(): bool => (bool) $state['running']);
+        $mock->method('signal')->willReturnCallback(static function (int $signal) use ($state, $mock): Process {
+            if ($signal === SIGKILL) {
+                $state['running'] = false;
+            }
+
+            return $mock;
+        });
+        $mock->method('getExitCode')->willReturn(137);
+        $mock->method('getPid')->willReturn(random_int(1000, 99999));
+        $mock->method('start')->willReturnCallback(static function (?callable $callback = null): void {});
+
+        return $mock;
+    }
+
+    private function createRunningProcessThatExitsOnSigterm(): Process
+    {
+        $state = new \ArrayObject(['running' => true]);
+        $mock = $this->createMock(Process::class);
+        $mock->method('isRunning')->willReturnCallback(static fn(): bool => (bool) $state['running']);
+        $mock->method('signal')->willReturnCallback(static function (int $signal) use ($state, $mock): Process {
+            if ($signal === SIGTERM) {
+                $state['running'] = false;
+            }
+
+            return $mock;
+        });
+        $mock->method('getExitCode')->willReturn(0);
+        $mock->method('getPid')->willReturn(random_int(1000, 99999));
+        $mock->method('start')->willReturnCallback(static function (?callable $callback = null): void {});
+
+        return $mock;
+    }
+
+    private function createPermanentlyStubbornProcess(): Process
+    {
+        $mock = $this->createMock(Process::class);
+        $mock->method('isRunning')->willReturn(true);
+        $mock->method('signal')->willReturnSelf();
+        $mock->method('getExitCode')->willReturn(null);
+        $mock->method('getPid')->willReturn(random_int(1000, 99999));
+        $mock->method('start')->willReturnCallback(static function (?callable $callback = null): void {});
 
         return $mock;
     }

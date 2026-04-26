@@ -111,6 +111,53 @@ final class ConfigurationTest extends TestCase
         self::assertSame(['urgent'], $config['transports']['priority']['consume_args']['queues']);
     }
 
+    public function testDefaultShutdownTimeoutIs30(): void
+    {
+        $config = $this->process([
+            'transports' => [
+                'async' => null,
+            ],
+        ]);
+
+        self::assertSame(30, $config['shutdown_timeout']);
+    }
+
+    public function testCustomShutdownTimeout(): void
+    {
+        $config = $this->process([
+            'shutdown_timeout' => 90,
+            'transports' => [
+                'async' => null,
+            ],
+        ]);
+
+        self::assertSame(90, $config['shutdown_timeout']);
+    }
+
+    public function testShutdownTimeoutZeroIsValid(): void
+    {
+        $config = $this->process([
+            'shutdown_timeout' => 0,
+            'transports' => [
+                'async' => null,
+            ],
+        ]);
+
+        self::assertSame(0, $config['shutdown_timeout']);
+    }
+
+    public function testNegativeShutdownTimeoutIsInvalid(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+
+        $this->process([
+            'shutdown_timeout' => -1,
+            'transports' => [
+                'async' => null,
+            ],
+        ]);
+    }
+
     public function testEmptyTransportsThrowsException(): void
     {
         $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
@@ -129,13 +176,13 @@ final class ConfigurationTest extends TestCase
 
     /**
      * @param array<string, mixed> $config
-     * @return array{transports: array<string, array{processes: int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}>}
+     * @return array{shutdown_timeout: int, transports: array<string, array{processes: int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}>}
      */
     private function process(array $config): array
     {
         $processor = new Processor();
 
-        /** @var array{transports: array<string, array{processes: int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}>} */
+        /** @var array{shutdown_timeout: int, transports: array<string, array{processes: int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}>} */
         return $processor->processConfiguration(new Configuration(), [$config]);
     }
 }
