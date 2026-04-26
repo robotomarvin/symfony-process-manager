@@ -19,7 +19,7 @@ final readonly class AutoscalerConfig
         public int $scaleDownStep,
         public StrategyConfig $strategy,
     ) {
-        assert($min >= 0, 'min must be non-negative');
+        assert($min >= 1, 'min must be >= 1');
         assert($max >= $min, 'max must be >= min');
         assert($smoothingWindowSec > 0, 'smoothing window must be positive');
         assert($scaleUpCooldownSec >= 0, 'scale up cooldown must be non-negative');
