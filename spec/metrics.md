@@ -135,7 +135,7 @@ worker_last_pong_timestamp{worker="1"} 1744459200.456
 
 The label value is the string representation of the worker's integer ID.
 
-Updated in `handleIpcMessage()` when a `PongMessage` is received.
+Updated in `handleIpcMessage()` when a `PongMessage` is received. Cleared when the worker process exits.
 
 ---
 
@@ -151,7 +151,73 @@ Updated in `handleIpcMessage()` when a `PongMessage` is received.
 messages_processed_total{transport="async"} 1427
 ```
 
-Incremented by `WorkerOutputFormatter` when it detects a "was handled successfully" string in a worker log line, OR by `ProcessManagerLoop::handleIpcMessage()` when it receives a `ProcessedCommandMessage` with `status=handled`.
+Incremented by `ProcessManagerLoop::handleIpcMessage()` when it receives a `ProcessedCommandMessage` with `status=handled`.
+
+---
+
+### `worker_busy`
+
+**Type:** Gauge
+**Labels:** `worker`, `transport`
+**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker process exits — including draining workers, which keep emitting busy/idle transitions through the drain window so operators can observe drain progress per worker.
+
+Set on `WorkerStartedHandlingMessage` (busy) and `ProcessedCommandMessage` (idle).
+
+---
+
+### `worker_busy_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Count of currently-busy workers per pool, set by the autoscaler on each evaluation. Includes draining workers still finishing their last message — a worker handling a message is busy regardless of whether it is being torn down. Distinct from the strategy-snapshot view (`autoscaler_current_workers`), which excludes draining workers because they are not future capacity.
+
+---
+
+### `autoscaler_target_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Last autoscaler decision after the stability layer (clamp/step/cooldowns).
+
+---
+
+### `autoscaler_current_workers`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** Active worker count per pool, excluding draining workers.
+
+---
+
+### `autoscaler_unmet_demand`
+
+**Type:** Gauge
+**Labels:** `transport`
+**Description:** `desired - allocated` per autoscaler evaluation, after `PriorityArbiter`. Always 0 when `total_cap` is unset.
+
+---
+
+### `autoscaler_scale_up_total` / `autoscaler_scale_down_total`
+
+**Type:** Counter
+**Labels:** `transport`
+**Description:** Number of scale-up / scale-down events applied (after stability layer). Skipped decisions (cooldown, step cap, at min/max) are not counted here.
+
+---
+
+### `autoscaler_decisions_skipped_total`
+
+**Type:** Counter
+**Labels:** `transport`, `reason`
+**Description:** Number of autoscaler decisions skipped by the stability layer.
+
+`reason` values:
+
+- `cooldown_up` — scale-up cooldown not elapsed
+- `cooldown_down` — scale-down cooldown not elapsed
+- `step_cap` — direction was capped to zero by the step cap
+- `at_min` — already at `min`
+- `at_max` — already at `max`
 
 ---
 
@@ -180,6 +246,26 @@ Rules:
 | `transport` | Transport name as configured (e.g., `async`) | Set at worker start; persists for the process lifetime |
 | `exit_code` | String integer (e.g., `"0"`, `"1"`, `"143"`) | SIGTERM exit is typically 143 (128+15) |
 | `worker` | String integer worker ID (e.g., `"0"`, `"1"`) | IDs are 0-based, scoped per transport |
+
+---
+
+## Grafana Dashboard
+
+`docker/grafana/provisioning/dashboards/process-manager.json` exposes these metrics in three rows:
+
+- **Stat header** — `process_manager_running`, `messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
+- **Messages** — `messages_processed_total` per transport.
+- **Worker Lifecycle** — `worker_starts_total`, `worker_exits_total` by `exit_code`, `worker_failures_total` + `worker_backoffs_total`.
+- **Autoscaler** —
+  - Stat row: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand` (summed across selected transports).
+  - *Workers per Transport* — stacked `autoscaler_current_workers` with dashed `autoscaler_target_workers` overlay (stepAfter).
+  - *Pool Utilization* — `worker_busy_workers / autoscaler_current_workers`, percentunit, thresholds 0.7 / 0.85 / 0.95.
+  - *Busy vs Idle Workers* — stacked `worker_busy_workers` and `current − busy`.
+  - *Scale Events / min* — rate of `autoscaler_scale_up_total` and `autoscaler_scale_down_total`.
+  - *Skipped Decisions / min by Reason* — stacked rate of `autoscaler_decisions_skipped_total` by `reason`.
+- **Worker Liveness** — `time() − worker_last_pong_timestamp` per worker.
+
+The dashboard relies on the autoscaler emitting `autoscaler_current_workers` for **every** configured transport, including pools using the Fixed strategy — `AutoscalerLoop` evaluates all pools registered through `services.yaml`, so this holds without special-casing.
 
 ---
 

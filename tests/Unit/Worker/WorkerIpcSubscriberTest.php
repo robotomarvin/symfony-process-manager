@@ -9,13 +9,14 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
 use Symfony\Component\Messenger\Event\WorkerMessageHandledEvent;
+use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
 use Symfony\Component\Messenger\Event\WorkerRunningEvent;
-use Symfony\Component\Messenger\Worker;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcEndpoint;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
 use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
+use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
 use SymfonyProcessManager\Worker\WorkerIpcSubscriber;
 
 #[CoversClass(WorkerIpcSubscriber::class)]
@@ -138,8 +139,24 @@ final class WorkerIpcSubscriberTest extends TestCase
         $events = WorkerIpcSubscriber::getSubscribedEvents();
 
         self::assertArrayHasKey(WorkerRunningEvent::class, $events);
+        self::assertArrayHasKey(WorkerMessageReceivedEvent::class, $events);
         self::assertArrayHasKey(WorkerMessageHandledEvent::class, $events);
         self::assertArrayHasKey(WorkerMessageFailedEvent::class, $events);
+    }
+
+    public function testOnMessageReceivedSendsWorkerStartedHandlingMessage(): void
+    {
+        $subscriber = $this->createSubscriber();
+        $envelope = new Envelope(new \stdClass());
+        $event = new WorkerMessageReceivedEvent($envelope, 'async');
+
+        $subscriber->onMessageReceived($event);
+
+        $output = $this->readStream($this->stdoutStream);
+        $message = $this->codec->decode(trim($output));
+
+        self::assertInstanceOf(WorkerStartedHandlingMessage::class, $message);
+        self::assertSame('stdClass', $message->command);
     }
 
     public function testErrorInfoIsTruncatedTo500Chars(): void

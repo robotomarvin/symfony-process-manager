@@ -8,9 +8,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use React\EventLoop\Loop;
-use SymfonyProcessManager\Http\HttpServer;
-use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
+use SymfonyProcessManager\ProcessManager\Orchestrator;
 
 #[AsCommand(
     name: 'pm:serve',
@@ -18,12 +16,8 @@ use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
 )]
 final class ServeCommand extends Command
 {
-    public function __construct(
-        private readonly HttpServer $httpServer,
-        private readonly ProcessManagerLoop $processManagerLoop,
-        private readonly string $httpHost = '127.0.0.1',
-        private readonly int $httpPort = 9100,
-    ) {
+    public function __construct(private readonly Orchestrator $orchestrator)
+    {
         parent::__construct();
     }
 
@@ -31,10 +25,6 @@ final class ServeCommand extends Command
     {
         unset($input, $output);
 
-        $eventLoop = Loop::get();
-
-        $this->httpServer->start($eventLoop, $this->httpHost, $this->httpPort);
-
-        return $this->processManagerLoop->run($eventLoop);
+        return $this->orchestrator->run();
     }
 }

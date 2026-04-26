@@ -7,12 +7,14 @@ namespace SymfonyProcessManager\Worker;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
 use Symfony\Component\Messenger\Event\WorkerMessageHandledEvent;
+use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
 use Symfony\Component\Messenger\Event\WorkerRunningEvent;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcEndpoint;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
 use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
+use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
 
 final class WorkerIpcSubscriber implements EventSubscriberInterface
 {
@@ -40,6 +42,7 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
     {
         return [
             WorkerRunningEvent::class => 'onWorkerRunning',
+            WorkerMessageReceivedEvent::class => 'onMessageReceived',
             WorkerMessageHandledEvent::class => 'onMessageHandled',
             WorkerMessageFailedEvent::class => 'onMessageFailed',
         ];
@@ -49,6 +52,13 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
     {
         $this->ensureNonBlocking();
         $this->drainStdin();
+    }
+
+    public function onMessageReceived(WorkerMessageReceivedEvent $event): void
+    {
+        $messageClass = $this->getMessageClass($event->getEnvelope()->getMessage());
+
+        $this->endpoint->send(new WorkerStartedHandlingMessage(command: $messageClass));
     }
 
     public function onMessageHandled(WorkerMessageHandledEvent $event): void

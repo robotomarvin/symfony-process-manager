@@ -5,9 +5,24 @@ parameters:
 
 symfony_process_manager:
     shutdown_timeout: '%env(int:default:symfony_process_manager_fixture_shutdown_timeout:PM_SHUTDOWN_TIMEOUT)%'
+    autoscaler_interval_sec: 1
     http_server:
         host: '%env(default:symfony_process_manager_fixture_http_host:PM_HTTP_HOST)%'
         port: '%env(int:default:symfony_process_manager_fixture_http_port:PM_HTTP_PORT)%'
     transports:
         async:
             processes: 1
+        scalable:
+            autoscaler:
+                min: 1
+                max: 3
+                smoothing_window_sec: 2
+                scale_up_cooldown_sec: 1
+                scale_down_cooldown_sec: 8
+                scale_up_step: 2
+                scale_down_step: 1
+                strategy:
+                    type: utilization
+                    target: 0.7
+                    scale_up_threshold: 0.7
+                    scale_down_threshold: 0.2

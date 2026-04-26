@@ -23,5 +23,8 @@ parameters:
             identifier: attribute.nonRepeatable
             path: tests/E2E/ProcessCommandTest.php
         -
+            identifier: attribute.nonRepeatable
+            path: tests/E2E/AutoscalerTest.php
+        -
             message: '#Call to method (arrayNode|integerNode)\(\) on an unknown class#'
             path: src/DependencyInjection/Configuration.php

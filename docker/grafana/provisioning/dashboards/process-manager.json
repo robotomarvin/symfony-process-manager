@@ -397,10 +397,344 @@
       }
     },
     {
+      "id": 14,
+      "type": "row",
+      "title": "Autoscaler",
+      "gridPos": {"x": 0, "y": 22, "w": 24, "h": 1},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Target Workers",
+      "description": "Sum of autoscaler target across selected transports (after stability layer)",
+      "gridPos": {"x": 0, "y": 23, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(autoscaler_target_workers{transport=~\"$transport\"}) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "blue", "value": null}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Current Workers",
+      "description": "Sum of active (non-draining) workers across selected transports",
+      "gridPos": {"x": 8, "y": 23, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(autoscaler_current_workers{transport=~\"$transport\"}) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "blue", "value": null}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Unmet Demand",
+      "description": "Workers requested by strategies but withheld by PriorityArbiter (always 0 when total_cap unset)",
+      "gridPos": {"x": 16, "y": 23, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum(autoscaler_unmet_demand{transport=~\"$transport\"}) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Workers per Transport",
+      "description": "Active worker count (stacked) with autoscaler target overlay (dashed). stepAfter interpolation reflects discrete scaling events.",
+      "gridPos": {"x": 0, "y": 27, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "autoscaler_current_workers{transport=~\"$transport\"}",
+          "refId": "A",
+          "legendFormat": "current · {{transport}}"
+        },
+        {
+          "expr": "autoscaler_target_workers{transport=~\"$transport\"}",
+          "refId": "B",
+          "legendFormat": "target · {{transport}}"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "desc"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"]}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "current"},
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byRegexp", "options": "^target.*"},
+            "properties": [
+              {"id": "custom.lineStyle", "value": {"dash": [8, 4], "fill": "dash"}},
+              {"id": "custom.fillOpacity", "value": 0},
+              {"id": "custom.stacking", "value": {"mode": "none"}}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Pool Utilization",
+      "description": "Busy / current worker ratio per transport. Crosses the scale-up threshold mean strategies want more workers.",
+      "gridPos": {"x": 12, "y": 27, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "worker_busy_workers{transport=~\"$transport\"} / autoscaler_current_workers{transport=~\"$transport\"}",
+          "refId": "A",
+          "legendFormat": "{{transport}}"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "desc"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"]}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "custom": {
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.7},
+              {"color": "orange", "value": 0.85},
+              {"color": "red", "value": 0.95}
+            ]
+          },
+          "color": {"mode": "thresholds"}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Busy vs Idle Workers",
+      "description": "Stacked busy/idle workers per transport. Idle = current - busy.",
+      "gridPos": {"x": 0, "y": 35, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "worker_busy_workers{transport=~\"$transport\"}",
+          "refId": "A",
+          "legendFormat": "busy · {{transport}}"
+        },
+        {
+          "expr": "clamp_min(autoscaler_current_workers{transport=~\"$transport\"} - worker_busy_workers{transport=~\"$transport\"}, 0)",
+          "refId": "B",
+          "legendFormat": "idle · {{transport}}"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "desc"},
+        "legend": {"displayMode": "list", "placement": "bottom"}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 30,
+            "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "A"},
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byRegexp", "options": "^busy.*"},
+            "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byRegexp", "options": "^idle.*"},
+            "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Scale Events / min",
+      "description": "Scale-up and scale-down events applied by the autoscaler (after stability layer)",
+      "gridPos": {"x": 12, "y": 35, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum by(transport) (rate(autoscaler_scale_up_total{transport=~\"$transport\"}[1m])) * 60",
+          "refId": "A",
+          "legendFormat": "up · {{transport}}"
+        },
+        {
+          "expr": "sum by(transport) (rate(autoscaler_scale_down_total{transport=~\"$transport\"}[1m])) * 60",
+          "refId": "B",
+          "legendFormat": "down · {{transport}}"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "desc"},
+        "legend": {"displayMode": "list", "placement": "bottom"}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": {
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byRegexp", "options": "^up.*"},
+            "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byRegexp", "options": "^down.*"},
+            "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Skipped Decisions / min by Reason",
+      "description": "Autoscaler decisions skipped by the stability layer, broken down by reason (cooldown_up, cooldown_down, step_cap, at_min, at_max)",
+      "gridPos": {"x": 0, "y": 43, "w": 24, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "expr": "sum by(reason, transport) (rate(autoscaler_decisions_skipped_total{transport=~\"$transport\"}[1m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{reason}} · {{transport}}"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "desc"},
+        "legend": {"displayMode": "list", "placement": "bottom"}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": {
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 12,
       "type": "row",
       "title": "Worker Liveness",
-      "gridPos": {"x": 0, "y": 22, "w": 24, "h": 1},
+      "gridPos": {"x": 0, "y": 49, "w": 24, "h": 1},
       "collapsed": false,
       "panels": []
     },
@@ -409,7 +743,7 @@
       "type": "timeseries",
       "title": "Seconds Since Last Pong",
       "description": "Time elapsed since each worker last sent a heartbeat pong. Sustained spikes may indicate stuck or dead workers.",
-      "gridPos": {"x": 0, "y": 23, "w": 24, "h": 8},
+      "gridPos": {"x": 0, "y": 50, "w": 24, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
@@ -487,5 +821,5 @@
   "timezone": "browser",
   "title": "Symfony Process Manager",
   "uid": "symfony-pm-v1",
-  "version": 1
+  "version": 2
 }
