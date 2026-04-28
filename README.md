@@ -1,5 +1,8 @@
 # Symfony Process Manager
 
+> [!CAUTION]
+> Heavy work in progress. Pre-1.0 — may introduce large BC breaks any time. Pin to exact version and review changelog before upgrading until `1.0` lands.
+
 Symfony bundle that runs and supervises Symfony Messenger workers as subprocesses.
 
 `pm:serve` starts an event loop that:
