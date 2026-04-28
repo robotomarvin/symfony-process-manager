@@ -14,6 +14,7 @@ use SymfonyProcessManager\Http\HttpServer;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcFanout;
 use SymfonyProcessManager\Ipc\WorkerContext;
+use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
@@ -53,6 +54,7 @@ final class OrchestratorTest extends TestCase
             $metrics,
             new IpcFanout(new IpcCodec(), new NullLogger()),
             new WorkerContext(),
+            new MessageClassResolver(),
         );
 
         $autoscaler = new AutoscalerLoop(
@@ -99,6 +101,7 @@ final class OrchestratorTest extends TestCase
             $metrics,
             new IpcFanout(new IpcCodec(), new NullLogger()),
             new WorkerContext(),
+            new MessageClassResolver(),
         );
         $autoscaler = new AutoscalerLoop($reactLoop, $clock, new NullLogger(), $metrics, new StrategyRegistry($this->emptyContainer()), [], arbiter: null);
         $http = new HttpServer($reactLoop, new NullLogger(), $metrics, '127.0.0.1', 0);

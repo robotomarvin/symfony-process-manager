@@ -45,6 +45,12 @@ symfony_process_manager:
     host: 127.0.0.1
     port: 9100
 
+  metrics:
+    messages:
+      enabled: true
+      whitelist: []
+      duration_buckets: [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60]
+
   transports:
     async:
       # Static pool (legacy form)
@@ -84,6 +90,14 @@ symfony_process_manager:
 - `shutdown_timeout` (int seconds, default 30) — after SIGTERM is sent to workers, wait this many seconds before escalating to SIGKILL. Set to `0` to wait indefinitely.
 - `total_cap` (int|null, default null) — optional global ceiling on the sum of workers across all pools. When set, a `PriorityArbiter` shares the cap across pools by priority.
 - `autoscaler_interval_sec` (int seconds, default 10) — how often the autoscaler evaluates strategies and adjusts pool targets.
+
+### Metrics Options
+
+- `metrics.messages.enabled` (bool, default `true`) — when `false`, no `messenger_*` metrics are emitted and the in-worker subscriber is not registered (zero runtime cost).
+- `metrics.messages.whitelist` (list, default `[]`) — controls cardinality of the `message_class` label.
+  - Empty: every FQCN is its own label value.
+  - Otherwise each entry is either an exact FQCN or a glob (`*` / `?` resolved with `fnmatch`); message classes that match nothing are bucketed under `message_class="other"`.
+- `metrics.messages.duration_buckets` (list of floats, default `[0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60]`) — histogram bucket bounds in seconds. Sorted and deduped on load; `+Inf` is appended automatically by the renderer.
 
 ### Transport Options
 
@@ -162,9 +176,16 @@ Process manager:
 - `worker_failures_total{transport=...}` (counter)
 - `worker_backoffs_total{transport=...}` (counter)
 - `worker_sigkills_total` (counter)
-- `messages_processed_total{transport=...}` (counter)
 - `worker_last_pong_timestamp{worker=...}` (gauge) — cleared on worker exit
 - `worker_busy{worker=...,transport=...}` (gauge, 0/1) — cleared on worker exit
+
+Messenger messages (gated by `metrics.messages.enabled`):
+
+- `messenger_messages_processed_total{transport, message_class}` (counter)
+- `messenger_messages_failed_total{transport, message_class}` (counter)
+- `messenger_messages_retried_total{transport, message_class}` (counter)
+- `messenger_message_duration_seconds{transport, message_class}` (histogram, observed on `handled` and `failed`)
+- `messenger_messages_in_flight{transport}` (gauge, incremented on `received`, decremented on `handled`/`failed`)
 
 Autoscaler:
 

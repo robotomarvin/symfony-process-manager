@@ -12,6 +12,9 @@ final class MetricsRegistry
     /** @var array<string, Gauge> */
     private array $gauges = [];
 
+    /** @var array<string, Histogram> */
+    private array $histograms = [];
+
     public function __construct(
         private readonly PrometheusRendererInterface $renderer,
         private readonly MetricFactoryInterface $metricFactory,
@@ -53,8 +56,26 @@ final class MetricsRegistry
         $this->gauges[$name]->remove($labels);
     }
 
+    /**
+     * @param list<float|int> $buckets used only on first observation for a given name
+     * @param array<string, string> $labels
+     */
+    public function observeHistogram(
+        string $name,
+        float $value,
+        string $help = '',
+        array $buckets = [],
+        array $labels = [],
+    ): void {
+        if (!isset($this->histograms[$name])) {
+            $this->histograms[$name] = $this->metricFactory->createHistogram($name, $help, $buckets);
+        }
+
+        $this->histograms[$name]->observe($value, $labels);
+    }
+
     public function toPrometheusText(): string
     {
-        return $this->renderer->render($this->counters, $this->gauges);
+        return $this->renderer->render($this->counters, $this->gauges, $this->histograms);
     }
 }

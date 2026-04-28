@@ -11,12 +11,12 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\InputStream;
 use SymfonyProcessManager\Ipc\IpcFanout;
 use SymfonyProcessManager\Ipc\IpcMessage;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
-use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
 use SymfonyProcessManager\Ipc\WorkerContextInterface;
 use SymfonyProcessManager\Ipc\WorkerMetadata;
+use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 use SymfonyProcessManager\Transport\TransportConfig;
@@ -24,10 +24,19 @@ use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 final class ProcessManagerLoop
 {
+    public const DEFAULT_DURATION_BUCKETS = [0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0];
+
     private int $ticksSinceLastPing = 0;
+
+    /** @var array<string, int> */
+    private array $inFlight = [];
+
+    /** @var list<float> */
+    private readonly array $durationBuckets;
 
     /**
      * @param list<WorkerPool> $pools
+     * @param list<float|int> $durationBuckets
      */
     public function __construct(
         private readonly LoopInterface $loop,
@@ -40,9 +49,14 @@ final class ProcessManagerLoop
         private readonly MetricsRegistry $metrics,
         private readonly IpcFanout $ipcFanout,
         private readonly WorkerContextInterface $workerContext,
+        private readonly MessageClassResolver $messageClassResolver,
+        private readonly bool $messagesMetricsEnabled = true,
+        array $durationBuckets = self::DEFAULT_DURATION_BUCKETS,
         private readonly ?int $shutdownTimeoutSeconds = 30,
         private readonly int $pingIntervalTicks = 50,
-    ) {}
+    ) {
+        $this->durationBuckets = array_values(array_map(static fn(float|int $b): float => (float) $b, $durationBuckets));
+    }
 
     public function start(): void
     {
@@ -275,34 +289,98 @@ final class ProcessManagerLoop
             return;
         }
 
-        if ($message instanceof WorkerStartedHandlingMessage) {
-            $worker->markBusy();
-            $this->metrics->setGauge(
-                'worker_busy',
-                1.0,
-                'Whether worker is currently busy',
-                ['worker' => (string) $worker->id, 'transport' => $config->transport],
-            );
+        if ($message instanceof MessengerEventMessage) {
+            $this->handleMessengerEvent($message, $worker, $config);
+        }
+    }
 
+    private function handleMessengerEvent(
+        MessengerEventMessage $message,
+        WorkerState $worker,
+        TransportConfig $config,
+    ): void {
+        $busyLabels = ['worker' => (string) $worker->id, 'transport' => $config->transport];
+
+        switch ($message->event) {
+            case MessengerEventMessage::EVENT_RECEIVED:
+                $worker->markBusy();
+                $this->metrics->setGauge('worker_busy', 1.0, 'Whether worker is currently busy', $busyLabels);
+                break;
+            case MessengerEventMessage::EVENT_HANDLED:
+            case MessengerEventMessage::EVENT_FAILED:
+                $worker->markIdle();
+                $this->metrics->setGauge('worker_busy', 0.0, 'Whether worker is currently busy', $busyLabels);
+                $this->findPool($config->transport)?->recordMessageProcessed();
+                break;
+        }
+
+        if (!$this->messagesMetricsEnabled) {
             return;
         }
 
-        if ($message instanceof ProcessedCommandMessage) {
-            $worker->markIdle();
-            $this->metrics->setGauge(
-                'worker_busy',
-                0.0,
-                'Whether worker is currently busy',
-                ['worker' => (string) $worker->id, 'transport' => $config->transport],
-            );
+        $messageClass = $this->messageClassResolver->resolve($message->command);
+        $labels = ['transport' => $message->transport, 'message_class' => $messageClass];
 
-            $pool = $this->findPool($config->transport);
-            $pool?->recordMessageProcessed();
-
-            if ($message->status === 'handled') {
-                $this->metrics->incrementCounter('messages_processed', 'Total messages processed', ['transport' => $config->transport]);
-            }
+        switch ($message->event) {
+            case MessengerEventMessage::EVENT_RECEIVED:
+                $this->changeInFlight($message->transport, +1);
+                break;
+            case MessengerEventMessage::EVENT_HANDLED:
+                $this->metrics->incrementCounter(
+                    'messenger_messages_processed',
+                    'Total messenger messages handled successfully',
+                    $labels,
+                );
+                $this->observeDuration($message, $labels);
+                $this->changeInFlight($message->transport, -1);
+                break;
+            case MessengerEventMessage::EVENT_FAILED:
+                $this->metrics->incrementCounter(
+                    'messenger_messages_failed',
+                    'Total messenger messages that failed handling',
+                    $labels,
+                );
+                $this->observeDuration($message, $labels);
+                $this->changeInFlight($message->transport, -1);
+                break;
+            case MessengerEventMessage::EVENT_RETRIED:
+                $this->metrics->incrementCounter(
+                    'messenger_messages_retried',
+                    'Total messenger messages scheduled for retry',
+                    $labels,
+                );
+                break;
         }
+    }
+
+    /**
+     * @param array<string, string> $labels
+     */
+    private function observeDuration(MessengerEventMessage $message, array $labels): void
+    {
+        if ($message->durationSeconds === null) {
+            return;
+        }
+
+        $this->metrics->observeHistogram(
+            'messenger_message_duration_seconds',
+            $message->durationSeconds,
+            'Messenger message handling duration in seconds',
+            $this->durationBuckets,
+            $labels,
+        );
+    }
+
+    private function changeInFlight(string $transport, int $delta): void
+    {
+        $current = max(0, ($this->inFlight[$transport] ?? 0) + $delta);
+        $this->inFlight[$transport] = $current;
+        $this->metrics->setGauge(
+            'messenger_messages_in_flight',
+            (float) $current,
+            'Messenger messages currently in flight per transport',
+            ['transport' => $transport],
+        );
     }
 
     private function findPool(string $transport): ?WorkerPool

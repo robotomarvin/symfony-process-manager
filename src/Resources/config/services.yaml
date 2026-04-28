@@ -28,6 +28,9 @@ services:
     SymfonyProcessManager\Metrics\MetricFactoryInterface: '@SymfonyProcessManager\Metrics\MetricFactory'
     SymfonyProcessManager\Metrics\MetricFactory: ~
     SymfonyProcessManager\Metrics\MetricsRegistry: ~
+    SymfonyProcessManager\Metrics\MessageClassResolver:
+        arguments:
+            $whitelist: []
 
     SymfonyProcessManager\ProcessManager\ShutdownState: ~
     SymfonyProcessManager\ProcessManager\ProcessManagerLoop: ~

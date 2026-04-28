@@ -104,4 +104,32 @@ final class MetricsRegistryTest extends TestCase
 
         self::assertSame('', $text);
     }
+
+    public function testObserveHistogramRendersBucketsAndCount(): void
+    {
+        $this->registry->observeHistogram(
+            name: 'duration',
+            value: 0.3,
+            help: 'Duration',
+            buckets: [0.1, 0.5, 1.0],
+            labels: ['transport' => 'async'],
+        );
+
+        $text = $this->registry->toPrometheusText();
+
+        self::assertStringContainsString('# TYPE duration histogram', $text);
+        self::assertStringContainsString('duration_bucket{transport="async",le="0.5"} 1', $text);
+        self::assertStringContainsString('duration_count{transport="async"} 1', $text);
+    }
+
+    public function testObserveHistogramReusesExistingHistogram(): void
+    {
+        $this->registry->observeHistogram('duration', 0.05, 'Duration', [0.1, 1.0]);
+        $this->registry->observeHistogram('duration', 0.3, 'Duration', [0.1, 1.0]);
+
+        $text = $this->registry->toPrometheusText();
+
+        self::assertStringContainsString('duration_count 2', $text);
+        self::assertSame(1, substr_count($text, '# TYPE duration histogram'));
+    }
 }

@@ -316,6 +316,51 @@ final class ProcessCommandTest extends TestCase
         }
     }
 
+    public function testMetricsExposeMessengerCountersAndHistogram(): void
+    {
+        $runner = new ConsoleProcessRunner();
+        $session = $runner->start('pm:serve');
+
+        try {
+            $httpRecord = $session->waitForRecord(
+                static fn(array $record): bool => $record['message'] === 'HTTP server listening.',
+                5.0,
+            );
+
+            $this->waitForWorkerStart($session, 5.0);
+            $this->dispatchFixtureMessages(1, 'metrics-probe');
+
+            $this->waitForStdoutJsonLine(
+                $session,
+                static fn(array $record): bool => ($record['message'] ?? null) === 'Fixture message handled.'
+                    && ($record['context']['payload'] ?? null) === 'metrics-probe',
+                10.0,
+            );
+
+            $address = $httpRecord['context']['address'] ?? null;
+            self::assertIsString($address);
+            $address = str_replace('tcp://', '', $address);
+            $url = "http://{$address}/metrics";
+
+            $body = $this->scrapeUntil(
+                $url,
+                static fn(string $b): bool => str_contains($b, 'messenger_messages_processed_total')
+                    && str_contains($b, 'messenger_message_duration_seconds_bucket')
+                    && str_contains($b, 'messenger_messages_in_flight'),
+                10.0,
+            );
+
+            self::assertStringContainsString('# TYPE messenger_messages_processed_total counter', $body);
+            self::assertStringContainsString('# TYPE messenger_message_duration_seconds histogram', $body);
+            self::assertStringContainsString('# TYPE messenger_messages_in_flight gauge', $body);
+            self::assertStringContainsString('messenger_message_duration_seconds_count', $body);
+            self::assertStringContainsString('FixtureMessage', $body);
+            self::assertDoesNotMatchRegularExpression('/(^|[^_])messages_processed_total/', $body);
+        } finally {
+            $this->stopSessionIfRunning($session);
+        }
+    }
+
     public function testWorkerOutputPrefixesNonJsonLines(): void
     {
         $runner = new ConsoleProcessRunner();
@@ -446,6 +491,33 @@ final class ProcessCommandTest extends TestCase
             },
             $timeout,
         );
+    }
+
+    private function scrapeUntil(string $url, callable $predicate, float $timeout): string
+    {
+        $start = microtime(true);
+        $lastBody = '';
+
+        while ((microtime(true) - $start) < $timeout) {
+            $body = @file_get_contents($url);
+
+            if (is_string($body)) {
+                $lastBody = $body;
+
+                if ($predicate($body)) {
+                    return $body;
+                }
+            }
+
+            usleep(100_000);
+        }
+
+        throw new \RuntimeException(sprintf(
+            "Timed out scraping %s after %.1fs. Last body:\n%s",
+            $url,
+            $timeout,
+            $lastBody,
+        ));
     }
 
     private function signalPid(int $pid, int $signal): void

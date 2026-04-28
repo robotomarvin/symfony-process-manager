@@ -15,4 +15,9 @@ final class MetricFactory implements MetricFactoryInterface
     {
         return new Gauge($name, $help);
     }
+
+    public function createHistogram(string $name, string $help, array $buckets): Histogram
+    {
+        return new Histogram($name, $help, $buckets);
+    }
 }

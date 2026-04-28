@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Metrics\Counter;
 use SymfonyProcessManager\Metrics\Gauge;
+use SymfonyProcessManager\Metrics\Histogram;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 
 #[CoversClass(PrometheusTextRenderer::class)]
@@ -143,5 +144,37 @@ final class PrometheusTextRendererTest extends TestCase
 
         self::assertStringContainsString('requests_total{method="GET"} 2', $result);
         self::assertStringContainsString('requests_total{method="POST"} 1', $result);
+    }
+
+    public function testHistogramRendersBucketsSumAndCount(): void
+    {
+        $histogram = new Histogram('duration', 'Duration', [0.1, 0.5, 1.0]);
+        $histogram->observe(0.05);
+        $histogram->observe(0.3);
+        $histogram->observe(2.0);
+
+        $result = $this->renderer->render([], [], ['duration' => $histogram]);
+
+        self::assertStringContainsString('# HELP duration Duration', $result);
+        self::assertStringContainsString('# TYPE duration histogram', $result);
+        self::assertStringContainsString('duration_bucket{le="0.1"} 1', $result);
+        self::assertStringContainsString('duration_bucket{le="0.5"} 2', $result);
+        self::assertStringContainsString('duration_bucket{le="1"} 2', $result);
+        self::assertStringContainsString('duration_bucket{le="+Inf"} 3', $result);
+        self::assertStringContainsString('duration_count 3', $result);
+        self::assertStringContainsString('duration_sum ' . (0.05 + 0.3 + 2.0), $result);
+    }
+
+    public function testHistogramRendersWithLabels(): void
+    {
+        $histogram = new Histogram('duration', 'Duration', [0.1, 1.0]);
+        $histogram->observe(0.05, ['transport' => 'async']);
+
+        $result = $this->renderer->render([], [], ['duration' => $histogram]);
+
+        self::assertStringContainsString('duration_bucket{transport="async",le="0.1"} 1', $result);
+        self::assertStringContainsString('duration_bucket{transport="async",le="+Inf"} 1', $result);
+        self::assertStringContainsString('duration_sum{transport="async"} 0.05', $result);
+        self::assertStringContainsString('duration_count{transport="async"} 1', $result);
     }
 }

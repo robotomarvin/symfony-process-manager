@@ -8,8 +8,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcEndpoint;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
 
 #[CoversClass(IpcEndpoint::class)]
 final class IpcEndpointTest extends TestCase
@@ -45,14 +45,14 @@ final class IpcEndpointTest extends TestCase
         $endpoint = new IpcEndpoint($codec, $this->stream);
 
         $endpoint->send(new PingMessage());
-        $endpoint->send(new ProcessedCommandMessage('handled', 'TestCmd'));
+        $endpoint->send(new MessengerEventMessage('handled', 'TestCmd', 'async'));
 
         $output = $this->readStream();
         $lines = array_filter(explode("\n", $output));
 
         self::assertCount(2, $lines);
         self::assertInstanceOf(PingMessage::class, $codec->decode($lines[0]));
-        self::assertInstanceOf(ProcessedCommandMessage::class, $codec->decode($lines[1]));
+        self::assertInstanceOf(MessengerEventMessage::class, $codec->decode($lines[1]));
     }
 
     private function readStream(): string

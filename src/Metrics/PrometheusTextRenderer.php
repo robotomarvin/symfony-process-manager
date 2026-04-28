@@ -9,8 +9,9 @@ final class PrometheusTextRenderer implements PrometheusRendererInterface
     /**
      * @param array<string, Counter> $counters
      * @param array<string, Gauge> $gauges
+     * @param array<string, Histogram> $histograms
      */
-    public function render(array $counters, array $gauges): string
+    public function render(array $counters, array $gauges, array $histograms = []): string
     {
         $lines = [];
 
@@ -31,6 +32,31 @@ final class PrometheusTextRenderer implements PrometheusRendererInterface
 
             foreach ($gauge->getValues() as $entry) {
                 $lines[] = $this->formatMetricLine($name, $entry['labels'], $entry['value']);
+            }
+        }
+
+        foreach ($histograms as $histogram) {
+            $name = $histogram->getName();
+            $lines[] = '# HELP ' . $name . ' ' . $histogram->getHelp();
+            $lines[] = '# TYPE ' . $name . ' histogram';
+            $buckets = $histogram->getBuckets();
+
+            foreach ($histogram->getValues() as $entry) {
+                foreach ($buckets as $i => $bound) {
+                    $bucketLabels = $entry['labels'];
+                    $bucketLabels['le'] = self::formatBucketBound($bound);
+                    $lines[] = $this->formatMetricLine(
+                        $name . '_bucket',
+                        $bucketLabels,
+                        $entry['bucketCounts'][$i],
+                    );
+                }
+
+                $infLabels = $entry['labels'];
+                $infLabels['le'] = '+Inf';
+                $lines[] = $this->formatMetricLine($name . '_bucket', $infLabels, $entry['count']);
+                $lines[] = $this->formatMetricLine($name . '_sum', $entry['labels'], $entry['sum']);
+                $lines[] = $this->formatMetricLine($name . '_count', $entry['labels'], $entry['count']);
             }
         }
 
@@ -72,6 +98,15 @@ final class PrometheusTextRenderer implements PrometheusRendererInterface
         }
 
         return $formatted;
+    }
+
+    private static function formatBucketBound(float $bound): string
+    {
+        if ($bound === floor($bound) && abs($bound) < 1e15) {
+            return number_format($bound, 0, '.', '');
+        }
+
+        return rtrim(rtrim(sprintf('%.10F', $bound), '0'), '.');
     }
 
     private static function escapeLabelValue(string $value): string

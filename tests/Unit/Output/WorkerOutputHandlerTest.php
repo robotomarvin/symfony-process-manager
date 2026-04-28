@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Output\WorkerOutputFormatter;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
 
@@ -119,7 +119,7 @@ final class WorkerOutputHandlerTest extends TestCase
 
     public function testMixedIpcAndNormalOutputInSingleChunk(): void
     {
-        $ipcLine = $this->ipcCodec->encode(new ProcessedCommandMessage('handled', 'TestCmd'));
+        $ipcLine = $this->ipcCodec->encode(new MessengerEventMessage('handled', 'TestCmd', 'async'));
         $this->handler->handleOutput(1, Process::OUT, "normal log\n" . $ipcLine . "\nanother log\n");
 
         $expected = "[worker 1] normal log" . PHP_EOL . "[worker 1] another log" . PHP_EOL;
@@ -127,7 +127,7 @@ final class WorkerOutputHandlerTest extends TestCase
 
         $messages = $this->handler->getAndClearIpcMessages(1);
         self::assertCount(1, $messages);
-        self::assertInstanceOf(ProcessedCommandMessage::class, $messages[0]);
+        self::assertInstanceOf(MessengerEventMessage::class, $messages[0]);
     }
 
     public function testInvalidIpcJsonIsIgnoredAndNotQueued(): void
@@ -141,13 +141,13 @@ final class WorkerOutputHandlerTest extends TestCase
     public function testMultipleIpcMessagesInSingleChunk(): void
     {
         $ping = $this->ipcCodec->encode(new PingMessage());
-        $cmd = $this->ipcCodec->encode(new ProcessedCommandMessage('failed', 'Cmd', 'err'));
+        $cmd = $this->ipcCodec->encode(new MessengerEventMessage('failed', 'Cmd', 'async', null, 'RuntimeException'));
         $this->handler->handleOutput(1, Process::OUT, $ping . "\n" . $cmd . "\n");
 
         $messages = $this->handler->getAndClearIpcMessages(1);
         self::assertCount(2, $messages);
         self::assertInstanceOf(PingMessage::class, $messages[0]);
-        self::assertInstanceOf(ProcessedCommandMessage::class, $messages[1]);
+        self::assertInstanceOf(MessengerEventMessage::class, $messages[1]);
     }
 
     public function testIpcMessagesFromDifferentWorkersAreIsolated(): void

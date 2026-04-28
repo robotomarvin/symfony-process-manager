@@ -384,6 +384,58 @@ final class ConfigurationTest extends TestCase
         self::assertSame(4, $config['total_cap']);
     }
 
+    public function testMessagesMetricsDefaults(): void
+    {
+        $config = $this->process([
+            'transports' => ['async' => null],
+        ]);
+
+        $messages = $config['metrics']['messages'];
+        self::assertTrue($messages['enabled']);
+        self::assertSame([], $messages['whitelist']);
+        self::assertSame([0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0], $messages['duration_buckets']);
+    }
+
+    public function testMessagesMetricsCanBeDisabled(): void
+    {
+        $config = $this->process([
+            'metrics' => ['messages' => ['enabled' => false]],
+            'transports' => ['async' => null],
+        ]);
+
+        self::assertFalse($config['metrics']['messages']['enabled']);
+    }
+
+    public function testWhitelistAcceptsExactAndGlobEntries(): void
+    {
+        $config = $this->process([
+            'metrics' => ['messages' => ['whitelist' => ['App\\Foo', 'App\\Email\\*']]],
+            'transports' => ['async' => null],
+        ]);
+
+        self::assertSame(['App\\Foo', 'App\\Email\\*'], $config['metrics']['messages']['whitelist']);
+    }
+
+    public function testCustomDurationBucketsAreSortedAndDeduped(): void
+    {
+        $config = $this->process([
+            'metrics' => ['messages' => ['duration_buckets' => [1.0, 0.5, 0.5, 0.1]]],
+            'transports' => ['async' => null],
+        ]);
+
+        self::assertSame([0.1, 0.5, 1.0], $config['metrics']['messages']['duration_buckets']);
+    }
+
+    public function testEmptyDurationBucketsIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'metrics' => ['messages' => ['duration_buckets' => []]],
+            'transports' => ['async' => null],
+        ]);
+    }
+
     /**
      * @param array<string, mixed> $config
      * @return array{
@@ -391,6 +443,7 @@ final class ConfigurationTest extends TestCase
      *     total_cap: ?int,
      *     autoscaler_interval_sec: int,
      *     http_server: array{host: string, port: int},
+     *     metrics: array{messages: array{enabled: bool, whitelist: list<string>, duration_buckets: list<float>}},
      *     transports: array<string, array{
      *         processes: ?int,
      *         failure_limit: int,
@@ -429,6 +482,7 @@ final class ConfigurationTest extends TestCase
          *     total_cap: ?int,
          *     autoscaler_interval_sec: int,
          *     http_server: array{host: string, port: int},
+         *     metrics: array{messages: array{enabled: bool, whitelist: list<string>, duration_buckets: list<float>}},
          *     transports: array<string, array{
          *         processes: ?int,
          *         failure_limit: int,

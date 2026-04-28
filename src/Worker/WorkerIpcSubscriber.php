@@ -4,20 +4,24 @@ declare(strict_types=1);
 
 namespace SymfonyProcessManager\Worker;
 
+use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
 use Symfony\Component\Messenger\Event\WorkerMessageHandledEvent;
 use Symfony\Component\Messenger\Event\WorkerMessageReceivedEvent;
+use Symfony\Component\Messenger\Event\WorkerMessageRetriedEvent;
 use Symfony\Component\Messenger\Event\WorkerRunningEvent;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcEndpoint;
+use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
 use SymfonyProcessManager\Ipc\Message\PingMessage;
 use SymfonyProcessManager\Ipc\Message\PongMessage;
-use SymfonyProcessManager\Ipc\Message\ProcessedCommandMessage;
-use SymfonyProcessManager\Ipc\Message\WorkerStartedHandlingMessage;
 
 final class WorkerIpcSubscriber implements EventSubscriberInterface
 {
+    private const DURATION_MAP_MAX = 1024;
+
     private string $stdinBuffer = '';
 
     /** @var resource */
@@ -25,12 +29,16 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
 
     private bool $stdinReady = false;
 
+    /** @var array<int, float> */
+    private array $startedAt = [];
+
     /**
      * @param resource|null $stdinStream
      */
     public function __construct(
         private readonly IpcEndpoint $endpoint,
         private readonly IpcCodec $codec,
+        private readonly ClockInterface $clock,
         mixed $stdinStream = null,
     ) {
         $this->stdinStream = $stdinStream ?? \STDIN;
@@ -45,6 +53,7 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
             WorkerMessageReceivedEvent::class => 'onMessageReceived',
             WorkerMessageHandledEvent::class => 'onMessageHandled',
             WorkerMessageFailedEvent::class => 'onMessageFailed',
+            WorkerMessageRetriedEvent::class => 'onMessageRetried',
         ];
     }
 
@@ -56,31 +65,83 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
 
     public function onMessageReceived(WorkerMessageReceivedEvent $event): void
     {
-        $messageClass = $this->getMessageClass($event->getEnvelope()->getMessage());
+        $envelope = $event->getEnvelope();
+        $this->rememberStart($envelope);
 
-        $this->endpoint->send(new WorkerStartedHandlingMessage(command: $messageClass));
+        $this->endpoint->send(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_RECEIVED,
+            command: self::messageClass($envelope),
+            transport: $event->getReceiverName(),
+        ));
     }
 
     public function onMessageHandled(WorkerMessageHandledEvent $event): void
     {
-        $messageClass = $this->getMessageClass($event->getEnvelope()->getMessage());
+        $envelope = $event->getEnvelope();
 
-        $this->endpoint->send(new ProcessedCommandMessage(
-            status: 'handled',
-            command: $messageClass,
+        $this->endpoint->send(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: self::messageClass($envelope),
+            transport: $event->getReceiverName(),
+            durationSeconds: $this->popDuration($envelope),
         ));
     }
 
     public function onMessageFailed(WorkerMessageFailedEvent $event): void
     {
-        $messageClass = $this->getMessageClass($event->getEnvelope()->getMessage());
-        $errorInfo = mb_substr($event->getThrowable()->getMessage(), 0, 500);
+        $envelope = $event->getEnvelope();
 
-        $this->endpoint->send(new ProcessedCommandMessage(
-            status: 'failed',
-            command: $messageClass,
-            errorInfo: $errorInfo,
+        $this->endpoint->send(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_FAILED,
+            command: self::messageClass($envelope),
+            transport: $event->getReceiverName(),
+            durationSeconds: $this->popDuration($envelope),
+            errorClass: $event->getThrowable()::class,
         ));
+    }
+
+    public function onMessageRetried(WorkerMessageRetriedEvent $event): void
+    {
+        $envelope = $event->getEnvelope();
+        $this->popDuration($envelope);
+
+        $this->endpoint->send(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_RETRIED,
+            command: self::messageClass($envelope),
+            transport: $event->getReceiverName(),
+        ));
+    }
+
+    private function rememberStart(Envelope $envelope): void
+    {
+        if (count($this->startedAt) >= self::DURATION_MAP_MAX) {
+            $oldest = array_key_first($this->startedAt);
+
+            if ($oldest !== null) {
+                unset($this->startedAt[$oldest]);
+            }
+        }
+
+        $this->startedAt[spl_object_id($envelope->getMessage())] = $this->now();
+    }
+
+    private function popDuration(Envelope $envelope): ?float
+    {
+        $id = spl_object_id($envelope->getMessage());
+
+        if (!isset($this->startedAt[$id])) {
+            return null;
+        }
+
+        $start = $this->startedAt[$id];
+        unset($this->startedAt[$id]);
+
+        return $this->now() - $start;
+    }
+
+    private function now(): float
+    {
+        return (float) $this->clock->now()->format('U.u');
     }
 
     private function ensureNonBlocking(): void
@@ -125,8 +186,8 @@ final class WorkerIpcSubscriber implements EventSubscriberInterface
         }
     }
 
-    private function getMessageClass(object $message): string
+    private static function messageClass(Envelope $envelope): string
     {
-        return $message::class;
+        return $envelope->getMessage()::class;
     }
 }
