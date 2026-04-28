@@ -13,10 +13,11 @@ final class ConsoleProcessRunner
 
     /**
      * @param array<int, string> $arguments
+     * @param array<string, string> $env
      */
-    public function run(string $command, array $arguments = [], bool $assertNoWarnings = true): ConsoleProcessResult
+    public function run(string $command, array $arguments = [], bool $assertNoWarnings = true, array $env = []): ConsoleProcessResult
     {
-        $process = $this->createProcess($command, $arguments);
+        $process = $this->createProcess($command, $arguments, $env);
 
         $process->setTimeout(self::DEFAULT_TIMEOUT);
         $process->run();
@@ -47,10 +48,11 @@ final class ConsoleProcessRunner
 
     /**
      * @param array<int, string> $arguments
+     * @param array<string, string> $env
      */
-    public function start(string $command, array $arguments = [], bool $assertNoWarnings = true): ConsoleProcessSession
+    public function start(string $command, array $arguments = [], bool $assertNoWarnings = true, array $env = []): ConsoleProcessSession
     {
-        $process = $this->createProcess($command, $arguments);
+        $process = $this->createProcess($command, $arguments, $env);
         $process->setTimeout(self::DEFAULT_TIMEOUT);
         $process->start();
 
@@ -59,8 +61,9 @@ final class ConsoleProcessRunner
 
     /**
      * @param array<int, string> $arguments
+     * @param array<string, string> $env
      */
-    private function createProcess(string $command, array $arguments): Process
+    private function createProcess(string $command, array $arguments, array $env = []): Process
     {
         $projectRoot = dirname(__DIR__, 2);
 
@@ -74,7 +77,7 @@ final class ConsoleProcessRunner
             array_replace($_ENV, [
                 'APP_ENV' => 'test',
                 'APP_DEBUG' => '1',
-            ]),
+            ], $env),
         );
     }
 

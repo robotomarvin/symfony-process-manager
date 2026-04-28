@@ -26,3 +26,7 @@ symfony_process_manager:
                     target: 0.7
                     scale_up_threshold: 0.7
                     scale_down_threshold: 0.2
+
+when@test_capped:
+    symfony_process_manager:
+        total_cap: 2
