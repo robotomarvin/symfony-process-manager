@@ -13,9 +13,19 @@ build: ## Build the Docker image
 
 up: ## Start the process manager (detached)
 	$(COMPOSE) up --build -d
+	@printf '\nServices:\n'
+	@app_port=$$($(COMPOSE) port app 9100 2>/dev/null | cut -d: -f2); \
+	printf '  \033[36mApp:\033[0m        http://localhost:%s/metrics\n' "$${app_port:-?}"
 
 monitoring: ## Start the process manager + prometheus + grafana (detached)
 	$(COMPOSE_MON) up --build -d
+	@printf '\nServices:\n'
+	@grafana_port=$$($(COMPOSE_MON) port grafana 3000 2>/dev/null | cut -d: -f2); \
+	prom_port=$$($(COMPOSE_MON) port prometheus 9090 2>/dev/null | cut -d: -f2); \
+	app_port=$$($(COMPOSE_MON) port app 9100 2>/dev/null | cut -d: -f2); \
+	printf '  \033[36mGrafana:\033[0m    http://localhost:%s\n' "$${grafana_port:-?}"; \
+	printf '  \033[36mPrometheus:\033[0m http://localhost:%s\n' "$${prom_port:-?}"; \
+	printf '  \033[36mApp:\033[0m        http://localhost:%s/metrics\n' "$${app_port:-?}"
 
 down: ## Stop and remove all containers
 	$(COMPOSE_MON) down

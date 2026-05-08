@@ -236,7 +236,7 @@ make install     # run composer install inside the container
 ```bash
 PM_HOST_PORT=9100 PROMETHEUS_HOST_PORT=9090 GRAFANA_HOST_PORT=3000 make monitoring
 curl http://localhost:9100/metrics
-# Default Grafana credentials: admin / admin
+# Grafana opens the Process Manager dashboard directly (anonymous, no login)
 open http://localhost:3000
 ```
 
