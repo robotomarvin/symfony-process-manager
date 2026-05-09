@@ -68,7 +68,14 @@ final class IpcCodec
             return null;
         }
 
-        return $type::fromArray($payload);
+        try {
+            return $type::fromArray($payload);
+        } catch (\Throwable) {
+            // Malformed payload (missing required field, unknown enum value,
+            // type mismatch). Silent drop matches the existing decode-failure
+            // contract and prevents metric corruption from partial events.
+            return null;
+        }
     }
 
     public static function isIpcLine(string $line): bool

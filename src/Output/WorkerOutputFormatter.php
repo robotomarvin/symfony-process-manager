@@ -8,7 +8,7 @@ use SymfonyProcessManager\Ipc\IpcCodec;
 
 final class WorkerOutputFormatter
 {
-    public function format(int $workerId, string $line): string
+    public function format(int $workerId, string $consumerLabel, string $line): string
     {
         if (IpcCodec::isIpcLine($line)) {
             return '';
@@ -20,6 +20,7 @@ final class WorkerOutputFormatter
             $extra = $decoded['extra'] ?? null;
             $decoded['extra'] = is_array($extra) ? $extra : [];
             $decoded['extra']['worker_id'] = $workerId;
+            $decoded['extra']['consumer'] = $consumerLabel;
             $encoded = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
             if ($encoded !== false) {
@@ -27,7 +28,7 @@ final class WorkerOutputFormatter
             }
         }
 
-        return sprintf('[worker %d] %s', $workerId, $line);
+        return sprintf('[worker %d %s] %s', $workerId, $consumerLabel, $line);
     }
 
     /**

@@ -18,85 +18,87 @@ final class WorkerOutputFormatterTest extends TestCase
         $this->formatter = new WorkerOutputFormatter();
     }
 
-    public function testJsonWithNoExtraKeyAddsWorkerIdInExtra(): void
+    public function testJsonWithNoExtraKeyAddsWorkerIdAndConsumerInExtra(): void
     {
         $input = json_encode(['message' => 'hello'], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(1, $input);
+        $result = $this->formatter->format(1, 'ingest', $input);
         $decoded = $this->decodeJson($result);
 
         self::assertSame('hello', $decoded['message']);
         self::assertIsArray($decoded['extra']);
         self::assertSame(1, $decoded['extra']['worker_id']);
+        self::assertSame('ingest', $decoded['extra']['consumer']);
     }
 
-    public function testJsonWithExistingExtraArrayMergesWorkerId(): void
+    public function testJsonWithExistingExtraArrayMergesWorkerIdAndConsumer(): void
     {
         $input = json_encode(['message' => 'hi', 'extra' => ['channel' => 'app']], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(2, $input);
+        $result = $this->formatter->format(2, 'ingest', $input);
         $decoded = $this->decodeJson($result);
 
         self::assertIsArray($decoded['extra']);
         self::assertSame('app', $decoded['extra']['channel']);
         self::assertSame(2, $decoded['extra']['worker_id']);
+        self::assertSame('ingest', $decoded['extra']['consumer']);
     }
 
-    public function testJsonWithExtraNullReplacesWithWorkerId(): void
+    public function testJsonWithExtraNullReplacesWithIdentity(): void
     {
         $input = json_encode(['message' => 'test', 'extra' => null], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(1, $input);
+        $result = $this->formatter->format(1, 'async', $input);
         $decoded = $this->decodeJson($result);
 
-        self::assertSame(['worker_id' => 1], $decoded['extra']);
+        self::assertSame(['worker_id' => 1, 'consumer' => 'async'], $decoded['extra']);
     }
 
-    public function testJsonWithExtraNonArrayValueReplacesWithWorkerId(): void
+    public function testJsonWithExtraNonArrayValueReplacesWithIdentity(): void
     {
         $input = json_encode(['message' => 'test', 'extra' => 'string-value'], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(3, $input);
+        $result = $this->formatter->format(3, 'async', $input);
         $decoded = $this->decodeJson($result);
 
-        self::assertSame(['worker_id' => 3], $decoded['extra']);
+        self::assertSame(['worker_id' => 3, 'consumer' => 'async'], $decoded['extra']);
     }
 
-    public function testEmptyJsonObjectReturnPlainTextPrefix(): void
+    public function testEmptyJsonObjectReturnsPlainTextPrefix(): void
     {
-        $result = $this->formatter->format(1, '{}');
+        $result = $this->formatter->format(1, 'async', '{}');
 
-        self::assertSame('[worker 1] {}', $result);
+        self::assertSame('[worker 1 async] {}', $result);
     }
 
     public function testNonAssociativeJsonArrayReturnsPlainTextPrefix(): void
     {
-        $result = $this->formatter->format(1, '[1,2,3]');
+        $result = $this->formatter->format(1, 'async', '[1,2,3]');
 
-        self::assertSame('[worker 1] [1,2,3]', $result);
+        self::assertSame('[worker 1 async] [1,2,3]', $result);
     }
 
     public function testMalformedJsonReturnsPlainTextPrefix(): void
     {
-        $result = $this->formatter->format(1, '{bad json}');
+        $result = $this->formatter->format(1, 'async', '{bad json}');
 
-        self::assertSame('[worker 1] {bad json}', $result);
+        self::assertSame('[worker 1 async] {bad json}', $result);
     }
 
     public function testEmptyStringReturnsPlainTextPrefix(): void
     {
-        $result = $this->formatter->format(1, '');
+        $result = $this->formatter->format(1, 'async', '');
 
-        self::assertSame('[worker 1] ', $result);
+        self::assertSame('[worker 1 async] ', $result);
     }
 
     public function testPlainTextReturnsPlainTextPrefix(): void
     {
-        $result = $this->formatter->format(1, 'some plain text');
+        $result = $this->formatter->format(1, 'ingest', 'some plain text');
 
-        self::assertSame('[worker 1] some plain text', $result);
+        self::assertSame('[worker 1 ingest] some plain text', $result);
     }
 
     public function testJsonEncodingPreservesSlashesAndUnicode(): void
     {
         $input = json_encode(['path' => '/var/log', 'name' => "caf\u{00E9}"], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(1, $input);
+        $result = $this->formatter->format(1, 'async', $input);
 
         self::assertStringContainsString('/var/log', $result);
         self::assertStringContainsString("caf\u{00E9}", $result);
@@ -106,35 +108,37 @@ final class WorkerOutputFormatterTest extends TestCase
     public function testWorkerIdZeroInJsonPath(): void
     {
         $input = json_encode(['message' => 'test'], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(0, $input);
+        $result = $this->formatter->format(0, 'async', $input);
         $decoded = $this->decodeJson($result);
 
         self::assertIsArray($decoded['extra']);
         self::assertSame(0, $decoded['extra']['worker_id']);
+        self::assertSame('async', $decoded['extra']['consumer']);
     }
 
     public function testWorkerIdZeroInPlainTextPath(): void
     {
-        $result = $this->formatter->format(0, 'hello');
+        $result = $this->formatter->format(0, 'async', 'hello');
 
-        self::assertSame('[worker 0] hello', $result);
+        self::assertSame('[worker 0 async] hello', $result);
     }
 
     public function testLargeWorkerIdInJsonPath(): void
     {
         $input = json_encode(['message' => 'test'], JSON_THROW_ON_ERROR);
-        $result = $this->formatter->format(99, $input);
+        $result = $this->formatter->format(99, 'priority', $input);
         $decoded = $this->decodeJson($result);
 
         self::assertIsArray($decoded['extra']);
         self::assertSame(99, $decoded['extra']['worker_id']);
+        self::assertSame('priority', $decoded['extra']['consumer']);
     }
 
     public function testLargeWorkerIdInPlainTextPath(): void
     {
-        $result = $this->formatter->format(99, 'hello');
+        $result = $this->formatter->format(99, 'priority', 'hello');
 
-        self::assertSame('[worker 99] hello', $result);
+        self::assertSame('[worker 99 priority] hello', $result);
     }
 
     /**

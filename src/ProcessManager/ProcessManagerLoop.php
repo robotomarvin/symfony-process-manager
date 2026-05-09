@@ -9,6 +9,7 @@ use React\EventLoop\LoopInterface;
 use Symfony\Component\Clock\ClockInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\InputStream;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\Ipc\IpcFanout;
 use SymfonyProcessManager\Ipc\IpcMessage;
 use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
@@ -19,7 +20,6 @@ use SymfonyProcessManager\Ipc\WorkerMetadata;
 use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Output\WorkerOutputHandler;
-use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 final class ProcessManagerLoop
@@ -61,15 +61,15 @@ final class ProcessManagerLoop
     public function start(): void
     {
         $totalWorkers = 0;
-        $transports = [];
+        $consumers = [];
         foreach ($this->pools as $pool) {
             $totalWorkers += $pool->activeWorkerCount();
-            $transports[] = $pool->transport();
+            $consumers[$pool->label()] = $pool->transports();
         }
 
         $this->logger->info('Process manager server started.', [
             'workers' => $totalWorkers,
-            'transports' => $transports,
+            'consumers' => $consumers,
         ]);
 
         $intervalSec = $this->getMinPollIntervalMicroseconds() / 1_000_000;
@@ -120,19 +120,19 @@ final class ProcessManagerLoop
 
     private function tickPool(WorkerPool $pool, float $now): void
     {
-        $config = $pool->config;
-
         foreach ($pool->workers() as $worker) {
-            $this->tickWorker($worker, $config, $now, draining: false);
+            $this->tickWorker($worker, $pool, $now, draining: false);
         }
 
         foreach ($pool->drainingWorkers() as $worker) {
-            $this->tickWorker($worker, $config, $now, draining: true);
+            $this->tickWorker($worker, $pool, $now, draining: true);
         }
     }
 
-    private function tickWorker(WorkerState $worker, TransportConfig $config, float $now, bool $draining): void
+    private function tickWorker(WorkerState $worker, WorkerPool $pool, float $now, bool $draining): void
     {
+        $config = $pool->config;
+
         if (!$draining && !$this->shutdownState->isRequested() && $worker->shouldStart($now)) {
             $this->startWorker($worker, $config);
             return;
@@ -143,7 +143,7 @@ final class ProcessManagerLoop
         }
 
         if ($worker->isRunning()) {
-            $this->dispatchIpcMessages($worker, $config, $now);
+            $this->dispatchIpcMessages($worker, $pool, $now);
 
             if ($draining || $this->shutdownState->isRequested()) {
                 $this->sendStopSignal($worker);
@@ -155,10 +155,10 @@ final class ProcessManagerLoop
         $this->handleWorkerExit($worker, $config, $now, $draining);
     }
 
-    private function startWorker(WorkerState $worker, TransportConfig $config): void
+    private function startWorker(WorkerState $worker, ConsumerConfig $config): void
     {
         $process = $this->processFactory->create(
-            $config->transport,
+            $config->transports,
             $config->consumeArgs,
         );
 
@@ -168,16 +168,24 @@ final class ProcessManagerLoop
         $worker->setProcess($process);
         $worker->setInputStream($inputStream);
         $this->ipcFanout->register($worker->id, $inputStream);
+        $this->outputHandler->registerWorker($worker->id, $config->label);
 
         $workerId = $worker->id;
         $process->start(function (string $type, string $buffer) use ($workerId): void {
             $this->outputHandler->handleOutput($workerId, $type, $buffer);
         });
         $worker->markStarted();
-        $this->metrics->incrementCounter('worker_starts', 'Total number of worker starts', ['transport' => $config->transport]);
+
+        $this->metrics->incrementCounter(
+            'worker_starts',
+            'Total number of worker starts',
+            ['consumer' => $config->label],
+        );
+
         $this->logger->info('Worker started.', [
             'worker' => $worker->id,
-            'transport' => $config->transport,
+            'consumer' => $config->label,
+            'transports' => $config->transports,
             'pid' => $process->getPid(),
         ]);
     }
@@ -195,29 +203,39 @@ final class ProcessManagerLoop
 
     private function handleWorkerExit(
         WorkerState $worker,
-        TransportConfig $config,
+        ConsumerConfig $config,
         float $now,
         bool $draining,
     ): void {
         $exitCode = $worker->getProcess()->getExitCode();
         $pid = $worker->getProcess()->getPid();
         $this->outputHandler->flush($worker->id);
+        $this->outputHandler->unregisterWorker($worker->id);
         $this->ipcFanout->unregister($worker->id);
         $worker->getInputStream()?->close();
         $worker->clearInputStream();
         $worker->clearProcess();
 
         $this->metrics->removeGauge('worker_last_pong_timestamp', ['worker' => (string) $worker->id]);
-        $this->metrics->removeGauge('worker_busy', ['worker' => (string) $worker->id, 'transport' => $config->transport]);
+        foreach ($config->transports as $transport) {
+            $this->metrics->removeGauge(
+                'worker_busy',
+                ['worker' => (string) $worker->id, 'consumer' => $config->label, 'transport' => $transport],
+            );
+        }
 
         $exitCode = $exitCode ?? 1;
         $this->logger->info('Worker exited.', [
             'worker' => $worker->id,
-            'transport' => $config->transport,
+            'consumer' => $config->label,
             'pid' => $pid,
             'exit_code' => $exitCode,
         ]);
-        $this->metrics->incrementCounter('worker_exits', 'Total number of worker exits', ['exit_code' => (string) $exitCode]);
+        $this->metrics->incrementCounter(
+            'worker_exits',
+            'Total number of worker exits',
+            ['consumer' => $config->label, 'exit_code' => (string) $exitCode],
+        );
 
         if ($draining || $this->shutdownState->isRequested()) {
             $worker->markStopped();
@@ -232,13 +250,17 @@ final class ProcessManagerLoop
         }
 
         $worker->recordFailure($now, $config->failureWindowSeconds);
-        $this->metrics->incrementCounter('worker_failures', 'Total number of worker failures', ['transport' => $config->transport]);
+        $this->metrics->incrementCounter(
+            'worker_failures',
+            'Total number of worker failures',
+            ['consumer' => $config->label],
+        );
         $failureCount = $worker->getFailureCount();
 
         if ($failureCount > $config->failureLimit) {
             $this->logger->error('Worker failure limit reached.', [
                 'worker' => $worker->id,
-                'transport' => $config->transport,
+                'consumer' => $config->label,
             ]);
             $this->shutdownState->request(ShutdownReason::FAILURE_LIMIT, $now);
             $worker->markStopped();
@@ -251,7 +273,11 @@ final class ProcessManagerLoop
         );
 
         $worker->scheduleRestart($now, $delaySeconds);
-        $this->metrics->incrementCounter('worker_backoffs', 'Total number of worker backoffs', ['transport' => $config->transport]);
+        $this->metrics->incrementCounter(
+            'worker_backoffs',
+            'Total number of worker backoffs',
+            ['consumer' => $config->label],
+        );
         $this->logger->warning('Worker restarting after unexpected exit.', [
             'worker' => $worker->id,
             'delay_seconds' => $delaySeconds,
@@ -259,22 +285,22 @@ final class ProcessManagerLoop
         ]);
     }
 
-    private function dispatchIpcMessages(WorkerState $worker, TransportConfig $config, float $now): void
+    private function dispatchIpcMessages(WorkerState $worker, WorkerPool $pool, float $now): void
     {
         $messages = $this->outputHandler->getAndClearIpcMessages($worker->id);
 
         foreach ($messages as $message) {
-            $this->workerContext->setCurrent(new WorkerMetadata($worker->id, $config->transport));
+            $this->workerContext->setCurrent(new WorkerMetadata($worker->id, $pool->label()));
 
             try {
-                $this->handleIpcMessage($message, $worker, $config, $now);
+                $this->handleIpcMessage($message, $worker, $pool, $now);
             } finally {
                 $this->workerContext->clear();
             }
         }
     }
 
-    private function handleIpcMessage(IpcMessage $message, WorkerState $worker, TransportConfig $config, float $now): void
+    private function handleIpcMessage(IpcMessage $message, WorkerState $worker, WorkerPool $pool, float $now): void
     {
         if ($message instanceof PongMessage) {
             $worker->setLastPongAt($now);
@@ -290,16 +316,21 @@ final class ProcessManagerLoop
         }
 
         if ($message instanceof MessengerEventMessage) {
-            $this->handleMessengerEvent($message, $worker, $config);
+            $this->handleMessengerEvent($message, $worker, $pool);
         }
     }
 
     private function handleMessengerEvent(
         MessengerEventMessage $message,
         WorkerState $worker,
-        TransportConfig $config,
+        WorkerPool $pool,
     ): void {
-        $busyLabels = ['worker' => (string) $worker->id, 'transport' => $config->transport];
+        $config = $pool->config;
+        $busyLabels = [
+            'worker' => (string) $worker->id,
+            'consumer' => $config->label,
+            'transport' => $message->transport,
+        ];
 
         switch ($message->event) {
             case MessengerEventMessage::EVENT_RECEIVED:
@@ -310,8 +341,16 @@ final class ProcessManagerLoop
             case MessengerEventMessage::EVENT_FAILED:
                 $worker->markIdle();
                 $this->metrics->setGauge('worker_busy', 0.0, 'Whether worker is currently busy', $busyLabels);
-                $this->findPool($config->transport)?->recordMessageProcessed();
+                $pool->recordMessageProcessed($message->transport);
                 break;
+        }
+
+        if ($message->event === MessengerEventMessage::EVENT_HANDLED) {
+            $this->metrics->incrementCounter(
+                'messages_processed',
+                'Total messages processed',
+                ['consumer' => $config->label, 'transport' => $message->transport],
+            );
         }
 
         if (!$this->messagesMetricsEnabled) {
@@ -383,16 +422,6 @@ final class ProcessManagerLoop
         );
     }
 
-    private function findPool(string $transport): ?WorkerPool
-    {
-        foreach ($this->pools as $pool) {
-            if ($pool->transport() === $transport) {
-                return $pool;
-            }
-        }
-
-        return null;
-    }
 
     private function maybeSendPing(): void
     {

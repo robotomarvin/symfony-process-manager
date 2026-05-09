@@ -65,12 +65,15 @@ tests/Unit/
 │   └── WorkerOutputHandlerTest.php
 ├── ProcessManager/
 │   ├── ShutdownStateTest.php
+│   ├── WorkerPoolTest.php
 │   └── WorkerStateTest.php
+├── Consumer/
+│   └── ConsumerConfigTest.php
 ├── Transport/
-│   ├── ConsumeArgsTest.php
-│   └── TransportConfigTest.php
+│   └── ConsumeArgsTest.php
 └── Worker/
-    └── WorkerIpcSubscriberTest.php
+    ├── WorkerIpcSubscriberTest.php
+    └── WorkerProcessFactoryTest.php
 ```
 
 ### Time Control
@@ -187,7 +190,8 @@ $log->all();
 | Worker failure (code != 0) | Worker restarted with backoff delay |
 | Failure limit exceeded | All workers stopped, process exits 0 |
 | JSON log enrichment | `worker_id` field present in enriched log lines |
-| Plain text output | Output prefixed with `[worker N]` |
+| Plain text output | Output prefixed with `[worker N consumer-label]` |
+| Multi-transport consumer (`tests/E2E/MultiTransportTest.php`) | Single worker process consumes both `multi_a` and `multi_b`; `messages_processed_total{consumer,transport}` series appear for each |
 
 ---
 

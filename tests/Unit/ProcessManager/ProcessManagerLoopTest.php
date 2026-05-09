@@ -11,6 +11,7 @@ use Psr\Log\NullLogger;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\Ipc\IpcCodec;
 use SymfonyProcessManager\Ipc\IpcFanout;
 use SymfonyProcessManager\Ipc\Message\MessengerEventMessage;
@@ -29,7 +30,6 @@ use SymfonyProcessManager\ProcessManager\WorkerPool;
 use SymfonyProcessManager\Tests\Support\AutoAdvancingClock;
 use SymfonyProcessManager\Tests\Support\FakeLoop;
 use SymfonyProcessManager\Transport\ConsumeArgs;
-use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Worker\WorkerProcessFactoryInterface;
 
 #[CoversClass(ProcessManagerLoop::class)]
@@ -177,9 +177,10 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertArrayHasKey('exit_code', $exitRecord['context']);
         self::assertSame(1, $exitRecord['context']['exit_code']);
         self::assertArrayHasKey('worker', $exitRecord['context']);
+        self::assertSame('async', $exitRecord['context']['consumer']);
     }
 
-    public function testFactoryReceivesConfiguredTransportAndConsumeArgs(): void
+    public function testFactoryReceivesConfiguredTransportsAndConsumeArgs(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -194,11 +195,35 @@ final class ProcessManagerLoopTest extends TestCase
 
         $calls = $factory->getCreateCalls();
         self::assertNotEmpty($calls);
-        self::assertSame('async', $calls[0]['transport']);
+        self::assertSame(['async'], $calls[0]['transports']);
         $args = $calls[0]['consumeArgs'];
         self::assertSame(128, $args->memoryLimit);
         self::assertSame(300, $args->timeLimit);
         self::assertSame(50, $args->limit);
+    }
+
+    public function testFactoryReceivesAllTransportsForMultiTransportConsumer(): void
+    {
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+        $factory->addProcess($this->createExitedProcess(1));
+
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(
+                processes: 1,
+                label: 'ingest',
+                transports: ['orders', 'payments'],
+            ),
+        );
+
+        $this->runTicksUntilDone($loop);
+
+        $calls = $factory->getCreateCalls();
+        self::assertNotEmpty($calls);
+        self::assertSame(['orders', 'payments'], $calls[0]['transports']);
     }
 
     public function testNullExitCodeTreatedAsFailure(): void
@@ -234,7 +259,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertSame('failure_limit', $shutdownRecord['context']['reason']);
     }
 
-    public function testWorkerStartLogIncludesPid(): void
+    public function testWorkerStartLogIncludesPidAndConsumer(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -250,6 +275,8 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertNotNull($startRecord);
         self::assertArrayHasKey('pid', $startRecord['context']);
         self::assertArrayHasKey('worker', $startRecord['context']);
+        self::assertSame('async', $startRecord['context']['consumer']);
+        self::assertSame(['async'], $startRecord['context']['transports']);
     }
 
     public function testStartRegistersPeriodicTimerWithCorrectInterval(): void
@@ -266,7 +293,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertSame(0.2, $this->reactLoop->getPeriodicTimerInterval());
     }
 
-    public function testWorkerStartIncrementsStartCounter(): void
+    public function testWorkerStartIncrementsStartCounterPerConsumer(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -274,15 +301,23 @@ final class ProcessManagerLoopTest extends TestCase
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
 
-        $loop = $this->createLoop($factory, $this->buildPools(processes: 1));
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(
+                processes: 1,
+                label: 'ingest',
+                transports: ['orders', 'payments'],
+            ),
+        );
 
         $this->runTicksUntilDone($loop);
 
         $output = $this->metrics->toPrometheusText();
-        self::assertStringContainsString('worker_starts_total{transport="async"}', $output);
+        self::assertStringContainsString('worker_starts_total{consumer="ingest"}', $output);
+        self::assertStringNotContainsString('worker_starts_total{consumer="ingest",transport=', $output);
     }
 
-    public function testWorkerFailureIncrementsFailureCounter(): void
+    public function testWorkerFailureIncrementsFailureCounterPerConsumer(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -290,15 +325,25 @@ final class ProcessManagerLoopTest extends TestCase
         $factory->addProcess($this->createExitedProcess(1));
         $factory->addProcess($this->createExitedProcess(1));
 
-        $loop = $this->createLoop($factory, $this->buildPools(processes: 1));
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(
+                processes: 1,
+                label: 'ingest',
+                transports: ['orders', 'payments'],
+            ),
+        );
 
         $this->runTicksUntilDone($loop);
 
         $output = $this->metrics->toPrometheusText();
-        self::assertStringContainsString('worker_failures_total{transport="async"}', $output);
+        self::assertStringContainsString('worker_failures_total{consumer="ingest"}', $output);
+        self::assertStringContainsString('worker_backoffs_total{consumer="ingest"}', $output);
+        self::assertStringNotContainsString('worker_failures_total{consumer="ingest",transport=', $output);
+        self::assertStringNotContainsString('worker_backoffs_total{consumer="ingest",transport=', $output);
     }
 
-    public function testWorkerBackoffIncrementsBackoffCounter(): void
+    public function testWorkerExitIncrementsExitCounterWithConsumerAndExitCode(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -311,23 +356,7 @@ final class ProcessManagerLoopTest extends TestCase
         $this->runTicksUntilDone($loop);
 
         $output = $this->metrics->toPrometheusText();
-        self::assertStringContainsString('worker_backoffs_total{transport="async"}', $output);
-    }
-
-    public function testWorkerExitIncrementsExitCounterWithExitCodeLabel(): void
-    {
-        $factory = new FakeProcessFactory();
-        $factory->addProcess($this->createExitedProcess(1));
-        $factory->addProcess($this->createExitedProcess(1));
-        $factory->addProcess($this->createExitedProcess(1));
-        $factory->addProcess($this->createExitedProcess(1));
-
-        $loop = $this->createLoop($factory, $this->buildPools(processes: 1));
-
-        $this->runTicksUntilDone($loop);
-
-        $output = $this->metrics->toPrometheusText();
-        self::assertStringContainsString('worker_exits_total{exit_code="1"}', $output);
+        self::assertStringContainsString('worker_exits_total{consumer="async",exit_code="1"}', $output);
     }
 
     public function testRunningGaugeIsSetDuringTick(): void
@@ -344,6 +373,47 @@ final class ProcessManagerLoopTest extends TestCase
 
         $output = $this->metrics->toPrometheusText();
         self::assertStringContainsString('process_manager_running', $output);
+    }
+
+    public function testHandledMessengerEventUsesIpcReportedTransport(): void
+    {
+        $process = $this->createMock(Process::class);
+        $process->method('isRunning')->willReturn(true);
+        $process->method('getPid')->willReturn(12345);
+        $process->method('start')->willReturnCallback(function (?callable $callback = null): void {});
+
+        $factory = new FakeProcessFactory();
+        $factory->addProcess($process);
+
+        $loop = $this->createLoop(
+            $factory,
+            $this->buildPools(
+                processes: 1,
+                label: 'ingest',
+                transports: ['orders', 'payments'],
+            ),
+        );
+
+        $loop->tick();
+
+        $codec = new IpcCodec();
+        $ordersLine = $codec->encode(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Foo',
+            transport: 'orders',
+        ));
+        $paymentsLine = $codec->encode(new MessengerEventMessage(
+            event: MessengerEventMessage::EVENT_HANDLED,
+            command: 'App\\Bar',
+            transport: 'payments',
+        ));
+        $this->outputHandler->handleOutput(1, Process::OUT, $ordersLine . "\n" . $paymentsLine . "\n");
+
+        $loop->tick();
+
+        $output = $this->metrics->toPrometheusText();
+        self::assertStringContainsString('messages_processed_total{consumer="ingest",transport="orders"} 1', $output);
+        self::assertStringContainsString('messages_processed_total{consumer="ingest",transport="payments"} 1', $output);
     }
 
     public function testHandledMessengerEventIncrementsProcessedCounterAndObservesDuration(): void
@@ -657,7 +727,7 @@ final class ProcessManagerLoopTest extends TestCase
         self::assertCount(1, $sigkillRecords, 'SIGKILL must only be sent once even when worker ignores it');
     }
 
-    public function testStartLogsTotalWorkerCountAndTransports(): void
+    public function testStartLogsTotalWorkerCountAndConsumers(): void
     {
         $factory = new FakeProcessFactory();
         $factory->addProcess($this->createExitedProcess(1));
@@ -671,6 +741,7 @@ final class ProcessManagerLoopTest extends TestCase
         $startRecord = $this->logger->findRecord('Process manager server started.');
         self::assertNotNull($startRecord);
         self::assertSame(1, $startRecord['context']['workers']);
+        self::assertSame(['async' => ['async']], $startRecord['context']['consumers']);
     }
 
     /**
@@ -701,15 +772,19 @@ final class ProcessManagerLoopTest extends TestCase
     }
 
     /**
+     * @param list<string>|null $transports
      * @return list<WorkerPool>
      */
     private function buildPools(
         int $processes,
         int $pollIntervalMs = 200,
         ?ConsumeArgs $consumeArgs = null,
+        string $label = 'async',
+        ?array $transports = null,
     ): array {
-        $config = TransportConfig::create(
-            transport: 'async',
+        $config = ConsumerConfig::create(
+            label: $label,
+            transports: $transports ?? [$label],
             failureLimit: 3,
             failureWindowSeconds: 60,
             backoffBaseSeconds: 1,
@@ -836,7 +911,7 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
     private int $index = 0;
     private int $createCount = 0;
 
-    /** @var list<array{transport: string, consumeArgs: ConsumeArgs}> */
+    /** @var list<array{transports: list<string>, consumeArgs: ConsumeArgs}> */
     private array $createCalls = [];
 
     public function addProcess(Process $process): void
@@ -844,10 +919,10 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
         $this->processes[] = $process;
     }
 
-    public function create(string $transport, ConsumeArgs $consumeArgs): Process
+    public function create(array $transports, ConsumeArgs $consumeArgs): Process
     {
         $this->createCalls[] = [
-            'transport' => $transport,
+            'transports' => $transports,
             'consumeArgs' => $consumeArgs,
         ];
 
@@ -872,7 +947,7 @@ final class FakeProcessFactory implements WorkerProcessFactoryInterface
     }
 
     /**
-     * @return list<array{transport: string, consumeArgs: ConsumeArgs}>
+     * @return list<array{transports: list<string>, consumeArgs: ConsumeArgs}>
      */
     public function getCreateCalls(): array
     {

@@ -311,6 +311,7 @@ final class ProcessCommandTest extends TestCase
 
             self::assertIsArray($logLine['extra'] ?? null);
             self::assertSame(1, $logLine['extra']['worker_id'] ?? null);
+            self::assertSame('async', $logLine['extra']['consumer'] ?? null);
         } finally {
             $this->stopSessionIfRunning($session);
         }
@@ -355,7 +356,6 @@ final class ProcessCommandTest extends TestCase
             self::assertStringContainsString('# TYPE messenger_messages_in_flight gauge', $body);
             self::assertStringContainsString('messenger_message_duration_seconds_count', $body);
             self::assertStringContainsString('FixtureMessage', $body);
-            self::assertDoesNotMatchRegularExpression('/(^|[^_])messages_processed_total/', $body);
         } finally {
             $this->stopSessionIfRunning($session);
         }
@@ -372,11 +372,11 @@ final class ProcessCommandTest extends TestCase
 
             $line = $this->waitForStdoutLine(
                 $session,
-                static fn(string $stdoutLine): bool => str_contains($stdoutLine, '[worker 1] fixture plain output'),
+                static fn(string $stdoutLine): bool => str_contains($stdoutLine, '[worker 1 async] fixture plain output'),
                 5.0,
             );
 
-            self::assertSame('[worker 1] fixture plain output', $line);
+            self::assertSame('[worker 1 async] fixture plain output', $line);
         } finally {
             $this->stopSessionIfRunning($session);
         }

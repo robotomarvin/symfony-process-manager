@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace SymfonyProcessManager\ProcessManager;
 
 use SymfonyProcessManager\Autoscaler\Smoother\Ewma;
-use SymfonyProcessManager\Transport\TransportConfig;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 
 final class WorkerPool
 {
@@ -21,15 +21,22 @@ final class WorkerPool
     private float $lastScaledDownAt = 0.0;
 
     private int $nextWorkerId;
-    private int $messagesProcessedSinceLastSample = 0;
+
+    /** @var array<string, int> */
+    private array $messagesProcessedByTransport = [];
+
     private ?float $lastSampleAt = null;
 
     private readonly Ewma $busyEwma;
     private readonly Ewma $idleEwma;
-    private readonly Ewma $throughputEwma;
+
+    /** @var array<string, Ewma> */
+    private array $throughputEwmaByTransport = [];
+
+    private readonly Ewma $throughputAggregateEwma;
 
     public function __construct(
-        public readonly TransportConfig $config,
+        public readonly ConsumerConfig $config,
         int $startingWorkerId,
     ) {
         $this->target = $this->config->autoscaler->min;
@@ -38,16 +45,27 @@ final class WorkerPool
         $window = (float) $this->config->autoscaler->smoothingWindowSec;
         $this->busyEwma = new Ewma($window);
         $this->idleEwma = new Ewma($window);
-        $this->throughputEwma = new Ewma($window);
+        $this->throughputAggregateEwma = new Ewma($window);
+
+        foreach ($this->config->transports as $transport) {
+            $this->throughputEwmaByTransport[$transport] = new Ewma($window);
+            $this->messagesProcessedByTransport[$transport] = 0;
+        }
 
         for ($i = 0; $i < $this->config->autoscaler->min; $i++) {
             $this->workers[] = WorkerState::create($this->nextWorkerId++);
         }
     }
 
-    public function transport(): string
+    public function label(): string
     {
-        return $this->config->transport;
+        return $this->config->label;
+    }
+
+    /** @return list<string> */
+    public function transports(): array
+    {
+        return $this->config->transports;
     }
 
     /** @return list<WorkerState> */
@@ -123,9 +141,15 @@ final class WorkerPool
         return $this->target;
     }
 
-    public function recordMessageProcessed(): void
+    public function recordMessageProcessed(string $transport): void
     {
-        $this->messagesProcessedSinceLastSample++;
+        if (!isset($this->messagesProcessedByTransport[$transport])) {
+            // Unknown transport (worker reported a transport not in this pool's
+            // configured list) — ignored for throughput accounting.
+            return;
+        }
+
+        $this->messagesProcessedByTransport[$transport]++;
     }
 
     /**
@@ -138,12 +162,20 @@ final class WorkerPool
 
         $busy = (float) $this->activeBusyWorkerCount();
         $idle = (float) $this->idleWorkerCount();
-        $throughput = $deltaSeconds > 0.0 ? ($this->messagesProcessedSinceLastSample / $deltaSeconds) : 0.0;
-        $this->messagesProcessedSinceLastSample = 0;
+
+        $aggregateMessages = 0;
+        foreach ($this->messagesProcessedByTransport as $transport => $count) {
+            $perTransportThroughput = $deltaSeconds > 0.0 ? ($count / $deltaSeconds) : 0.0;
+            $this->throughputEwmaByTransport[$transport]->update($deltaSeconds, $perTransportThroughput);
+            $aggregateMessages += $count;
+            $this->messagesProcessedByTransport[$transport] = 0;
+        }
+
+        $aggregateThroughput = $deltaSeconds > 0.0 ? ($aggregateMessages / $deltaSeconds) : 0.0;
 
         $this->busyEwma->update($deltaSeconds, $busy);
         $this->idleEwma->update($deltaSeconds, $idle);
-        $this->throughputEwma->update($deltaSeconds, $throughput);
+        $this->throughputAggregateEwma->update($deltaSeconds, $aggregateThroughput);
     }
 
     public function smoothedBusy(): float
@@ -158,7 +190,18 @@ final class WorkerPool
 
     public function smoothedThroughput(): float
     {
-        return $this->throughputEwma->value();
+        return $this->throughputAggregateEwma->value();
+    }
+
+    /** @return array<string, float> */
+    public function smoothedThroughputByTransport(): array
+    {
+        $out = [];
+        foreach ($this->throughputEwmaByTransport as $transport => $ewma) {
+            $out[$transport] = $ewma->value();
+        }
+
+        return $out;
     }
 
     public function lastScaledUpAt(): float

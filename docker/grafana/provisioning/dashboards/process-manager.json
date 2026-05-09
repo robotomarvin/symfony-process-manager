@@ -72,12 +72,12 @@
       "id": 2,
       "type": "stat",
       "title": "Messages / min",
-      "description": "Current message processing rate across selected transports",
+      "description": "Current message processing rate across selected consumers",
       "gridPos": {"x": 4, "y": 0, "w": 5, "h": 4},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(rate(messenger_messages_processed_total{transport=~\"$transport\",message_class=~\"$message_class\"}[5m])) * 60 or vector(0)",
+          "expr": "sum(rate(messages_processed_total{consumer=~\"$consumer\"}[5m])) * 60 or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -160,7 +160,7 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(rate(worker_failures_total{transport=~\"$transport\"}[5m])) * 60 or vector(0)",
+          "expr": "sum(rate(worker_failures_total{consumer=~\"$consumer\"}[5m])) * 60 or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -203,7 +203,7 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(rate(worker_backoffs_total{transport=~\"$transport\"}[5m])) * 60 or vector(0)",
+          "expr": "sum(rate(worker_backoffs_total{consumer=~\"$consumer\"}[5m])) * 60 or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -249,14 +249,14 @@
       "id": 7,
       "type": "timeseries",
       "title": "Message Throughput",
-      "description": "Messages processed per minute, broken down by transport",
+      "description": "Messages processed per minute, broken down by consumer/transport",
       "gridPos": {"x": 0, "y": 5, "w": 24, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum by(transport) (rate(messenger_messages_processed_total{transport=~\"$transport\",message_class=~\"$message_class\"}[1m])) * 60",
+          "expr": "sum by(consumer, transport) (rate(messages_processed_total{consumer=~\"$consumer\"}[1m])) * 60",
           "refId": "A",
-          "legendFormat": "{{transport}}"
+          "legendFormat": "{{consumer}} · {{transport}}"
         }
       ],
       "options": {
@@ -516,14 +516,14 @@
       "id": 9,
       "type": "timeseries",
       "title": "Worker Starts / sec",
-      "description": "Rate of worker process launches per transport",
+      "description": "Rate of worker process launches per consumer",
       "gridPos": {"x": 0, "y": 30, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum by(transport) (rate(worker_starts_total{transport=~\"$transport\"}[1m]))",
+          "expr": "sum by(consumer) (rate(worker_starts_total{consumer=~\"$consumer\"}[1m]))",
           "refId": "A",
-          "legendFormat": "{{transport}}"
+          "legendFormat": "{{consumer}}"
         }
       ],
       "options": {
@@ -581,19 +581,19 @@
       "id": 11,
       "type": "timeseries",
       "title": "Failures & Backoffs",
-      "description": "Rate of worker failures (non-zero exits) and resulting backoff restarts per transport",
+      "description": "Rate of worker failures (non-zero exits) and resulting backoff restarts per consumer",
       "gridPos": {"x": 16, "y": 30, "w": 8, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum by(transport) (rate(worker_failures_total{transport=~\"$transport\"}[1m]))",
+          "expr": "sum by(consumer) (rate(worker_failures_total{consumer=~\"$consumer\"}[1m]))",
           "refId": "A",
-          "legendFormat": "failures · {{transport}}"
+          "legendFormat": "failures · {{consumer}}"
         },
         {
-          "expr": "sum by(transport) (rate(worker_backoffs_total{transport=~\"$transport\"}[1m]))",
+          "expr": "sum by(consumer) (rate(worker_backoffs_total{consumer=~\"$consumer\"}[1m]))",
           "refId": "B",
-          "legendFormat": "backoffs · {{transport}}"
+          "legendFormat": "backoffs · {{consumer}}"
         }
       ],
       "options": {
@@ -636,12 +636,12 @@
       "id": 15,
       "type": "stat",
       "title": "Target Workers",
-      "description": "Sum of autoscaler target across selected transports (after stability layer)",
+      "description": "Sum of autoscaler target across selected consumers (after stability layer)",
       "gridPos": {"x": 0, "y": 39, "w": 8, "h": 4},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(autoscaler_target_workers{transport=~\"$transport\"}) or vector(0)",
+          "expr": "sum(autoscaler_target_workers{consumer=~\"$consumer\"}) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -672,12 +672,12 @@
       "id": 16,
       "type": "stat",
       "title": "Current Workers",
-      "description": "Sum of active (non-draining) workers across selected transports",
+      "description": "Sum of active (non-draining) workers across selected consumers",
       "gridPos": {"x": 8, "y": 39, "w": 8, "h": 4},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(autoscaler_current_workers{transport=~\"$transport\"}) or vector(0)",
+          "expr": "sum(autoscaler_current_workers{consumer=~\"$consumer\"}) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -713,7 +713,7 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum(autoscaler_unmet_demand{transport=~\"$transport\"}) or vector(0)",
+          "expr": "sum(autoscaler_unmet_demand{consumer=~\"$consumer\"}) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -745,20 +745,20 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "Workers per Transport",
+      "title": "Workers per Consumer",
       "description": "Active worker count (stacked) with autoscaler target overlay (dashed). stepAfter interpolation reflects discrete scaling events.",
       "gridPos": {"x": 0, "y": 43, "w": 12, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "autoscaler_current_workers{transport=~\"$transport\"}",
+          "expr": "autoscaler_current_workers{consumer=~\"$consumer\"}",
           "refId": "A",
-          "legendFormat": "current · {{transport}}"
+          "legendFormat": "current · {{consumer}}"
         },
         {
-          "expr": "autoscaler_target_workers{transport=~\"$transport\"}",
+          "expr": "autoscaler_target_workers{consumer=~\"$consumer\"}",
           "refId": "B",
-          "legendFormat": "target · {{transport}}"
+          "legendFormat": "target · {{consumer}}"
         }
       ],
       "options": {
@@ -793,14 +793,14 @@
       "id": 19,
       "type": "timeseries",
       "title": "Pool Utilization",
-      "description": "Busy / current worker ratio per transport. Crosses the scale-up threshold mean strategies want more workers.",
+      "description": "Busy / current worker ratio per consumer. Crosses the scale-up threshold mean strategies want more workers.",
       "gridPos": {"x": 12, "y": 43, "w": 12, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "worker_busy_workers{transport=~\"$transport\"} / autoscaler_current_workers{transport=~\"$transport\"}",
+          "expr": "worker_busy_workers{consumer=~\"$consumer\"} / autoscaler_current_workers{consumer=~\"$consumer\"}",
           "refId": "A",
-          "legendFormat": "{{transport}}"
+          "legendFormat": "{{consumer}}"
         }
       ],
       "options": {
@@ -838,19 +838,19 @@
       "id": 20,
       "type": "timeseries",
       "title": "Busy vs Idle Workers",
-      "description": "Stacked busy/idle workers per transport. Idle = current - busy.",
+      "description": "Stacked busy/idle workers per consumer. Idle = current - busy.",
       "gridPos": {"x": 0, "y": 51, "w": 12, "h": 8},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "worker_busy_workers{transport=~\"$transport\"}",
+          "expr": "worker_busy_workers{consumer=~\"$consumer\"}",
           "refId": "A",
-          "legendFormat": "busy · {{transport}}"
+          "legendFormat": "busy · {{consumer}}"
         },
         {
-          "expr": "clamp_min(autoscaler_current_workers{transport=~\"$transport\"} - worker_busy_workers{transport=~\"$transport\"}, 0)",
+          "expr": "clamp_min(autoscaler_current_workers{consumer=~\"$consumer\"} - worker_busy_workers{consumer=~\"$consumer\"}, 0)",
           "refId": "B",
-          "legendFormat": "idle · {{transport}}"
+          "legendFormat": "idle · {{consumer}}"
         }
       ],
       "options": {
@@ -890,14 +890,14 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum by(transport) (rate(autoscaler_scale_up_total{transport=~\"$transport\"}[1m])) * 60",
+          "expr": "sum by(consumer) (rate(autoscaler_scale_up_total{consumer=~\"$consumer\"}[1m])) * 60",
           "refId": "A",
-          "legendFormat": "up · {{transport}}"
+          "legendFormat": "up · {{consumer}}"
         },
         {
-          "expr": "sum by(transport) (rate(autoscaler_scale_down_total{transport=~\"$transport\"}[1m])) * 60",
+          "expr": "sum by(consumer) (rate(autoscaler_scale_down_total{consumer=~\"$consumer\"}[1m])) * 60",
           "refId": "B",
-          "legendFormat": "down · {{transport}}"
+          "legendFormat": "down · {{consumer}}"
         }
       ],
       "options": {
@@ -935,9 +935,9 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {
-          "expr": "sum by(reason, transport) (rate(autoscaler_decisions_skipped_total{transport=~\"$transport\"}[1m])) * 60",
+          "expr": "sum by(reason, consumer) (rate(autoscaler_decisions_skipped_total{consumer=~\"$consumer\"}[1m])) * 60",
           "refId": "A",
-          "legendFormat": "{{reason}} · {{transport}}"
+          "legendFormat": "{{reason}} · {{consumer}}"
         }
       ],
       "options": {
@@ -1026,7 +1026,26 @@
       {
         "current": {},
         "datasource": {"type": "prometheus", "uid": "${datasource}"},
-        "definition": "label_values(worker_starts_total, transport)",
+        "definition": "label_values(autoscaler_current_workers, consumer)",
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Consumer",
+        "multi": true,
+        "name": "consumer",
+        "query": {
+          "query": "label_values(autoscaler_current_workers, consumer)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "definition": "label_values(messenger_messages_processed_total, transport)",
         "hide": 0,
         "includeAll": true,
         "allValue": ".*",
@@ -1034,7 +1053,7 @@
         "multi": true,
         "name": "transport",
         "query": {
-          "query": "label_values(worker_starts_total, transport)",
+          "query": "label_values(messenger_messages_processed_total, transport)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,

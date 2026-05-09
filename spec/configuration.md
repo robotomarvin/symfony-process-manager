@@ -39,12 +39,25 @@ symfony_process_manager:
     host: '127.0.0.1'   # string, default: 127.0.0.1
     port: 9100           # int,    default: 9100
 
-  # One entry per Symfony Messenger transport name.
-  # At least one transport is required.
-  # A transport must use either `processes` (static) OR `autoscaler` (dynamic),
+  # One entry per consumer. A consumer is a logical pool that runs N worker
+  # processes; each worker invokes `messenger:consume <transports...>` and
+  # consumes all listed transports in a single PHP process. Messenger polls
+  # them in list order — earlier transports drain before later ones get a
+  # turn (priority order, not round-robin).
+  # At least one consumer is required.
+  # A consumer must use either `processes` (static) OR `autoscaler` (dynamic),
   # never both — setting both is a configuration error.
-  transports:
-    <transport_name>:
+  consumers:
+    <consumer_label>:
+
+      # One or more Symfony Messenger transport names this consumer reads from.
+      # Required. Scalar form is shorthand for a one-element list:
+      #   transports: failed       # equivalent to [failed]
+      #   transports: [orders, payments]
+      # Multi-transport consumers run a single PHP process per worker that
+      # consumes all listed transports — `consume_args` cannot vary per
+      # transport (split into separate consumers if you need that).
+      transports: <name|[name, ...]>
 
       # Number of concurrent worker processes (static pool).
       # Min: 1. Default: 1 (when autoscaler is not configured).
@@ -84,12 +97,14 @@ symfony_process_manager:
       # Min: 1. Default: 30.
       backoff_max: 30
 
-      # How often (in milliseconds) the tick loop polls this transport's workers.
-      # The actual timer uses the minimum value across all transports.
+      # How often (in milliseconds) the tick loop polls this consumer's workers.
+      # The actual timer uses the minimum value across all consumers.
       # Min: 1. Default: 200.
       poll_interval_ms: 200
 
-      # Arguments forwarded to messenger:consume for this transport.
+      # Arguments forwarded to messenger:consume for this consumer.
+      # The block is process-wide — the same flags apply to every transport
+      # in the consumer's `transports` list.
       consume_args:
 
         # --memory-limit <MB>  Worker exits after consuming this much memory.
@@ -123,15 +138,16 @@ symfony_process_manager:
 
 ```yaml
 symfony_process_manager:
-  transports:
-    async: ~
+  consumers:
+    async:
+      transports: async
 ```
 
-This spawns one worker for the `async` transport with all defaults.
+This spawns one worker that runs `messenger:consume async` with all defaults.
 
 ---
 
-## Multi-Transport Example
+## Multi-Consumer / Multi-Transport Example
 
 ```yaml
 symfony_process_manager:
@@ -139,8 +155,9 @@ symfony_process_manager:
     host: '0.0.0.0'
     port: 9100
 
-  transports:
+  consumers:
     high_priority:
+      transports: high_priority
       processes: 3
       failure_limit: 5
       failure_window: 120
@@ -150,7 +167,18 @@ symfony_process_manager:
         time_limit: 3600
         memory_limit: 128
 
+    ingest:
+      # One worker process consumes both `orders` and `payments`. Messenger
+      # polls them in list order — `orders` is fully drained before
+      # `payments` gets attention. Use this for primary/fallback, not
+      # fair sharing.
+      transports: [orders, payments]
+      processes: 2
+      consume_args:
+        time_limit: 3600
+
     low_priority:
+      transports: low_priority
       processes: 1
       poll_interval_ms: 500
       consume_args:
@@ -166,9 +194,13 @@ symfony_process_manager:
 
 ## Option Details
 
+### `transports`
+
+Required. Symfony Messenger transport name(s) this consumer reads from. A scalar is normalized to a one-element list at config-load time, so `transports: failed` and `transports: [failed]` are equivalent. Multi-element lists become extra positional args to `messenger:consume`, so one PHP process consumes all listed transports — but **list order is priority order**, not round-robin: Messenger polls each loop iteration in the configured order and takes the first available message, so `t1` is fully drained before `t2` gets a turn. Use this for primary/fallback (e.g. `[main, failed]`); for fair sharing across transports, give each its own consumer. The list must contain at least one entry.
+
 ### `processes`
 
-Controls how many `messenger:consume` subprocesses run concurrently for the transport. Each process has an independent failure counter and restart schedule. Setting this to N does **not** mean N messages are processed in parallel — each worker is single-threaded; parallelism comes from multiple OS processes.
+Controls how many `messenger:consume` subprocesses run concurrently for the consumer. Each process has an independent failure counter and restart schedule. Setting this to N does **not** mean N messages are processed in parallel — each worker is single-threaded; parallelism comes from multiple OS processes. For a multi-transport consumer, each of the N processes consumes all listed transports.
 
 ### `failure_limit` and `failure_window`
 
@@ -198,17 +230,17 @@ Where `attempt` is the number of failures recorded in the current window. Exampl
 
 ### `poll_interval_ms`
 
-The period at which the event loop checks worker state. Lower values mean faster detection of worker exits and faster restarts, but higher CPU overhead. The loop timer uses the **minimum** value across all configured transports, so one transport cannot starve others.
+The period at which the event loop checks worker state. Lower values mean faster detection of worker exits and faster restarts, but higher CPU overhead. The loop timer uses the **minimum** value across all configured consumers, so one consumer cannot starve others.
 
 ### `consume_args`
 
 These map directly to `messenger:consume` CLI options. The generated command looks like:
 
 ```
-php bin/console messenger:consume <transport> [queues...] [--memory-limit=N] [--time-limit=N] [--limit=N] [--sleep=N] [extra...]
+php bin/console messenger:consume <transport_1> [<transport_2> ...] [queues...] [--memory-limit=N] [--time-limit=N] [--limit=N] [--sleep=N] [extra...]
 ```
 
-Options with `null` values are omitted from the command line entirely.
+Options with `null` values are omitted from the command line entirely. Per-transport overrides are not supported — `consume_args` is process-wide. If a single transport needs different flags, give it its own consumer.
 
 ---
 
@@ -216,10 +248,10 @@ Options with `null` values are omitted from the command line entirely.
 
 The `SymfonyProcessManagerExtension` loads `Resources/config/services.yaml` and then injects the processed configuration into services:
 
-- A `WorkerPool` service is registered per transport (id: `symfony_process_manager.worker_pool.<name>`).
+- A `WorkerPool` service is registered per consumer (id: `symfony_process_manager.worker_pool.<consumer_label>`).
 - `ProcessManagerLoop` receives the list of pools and `shutdownTimeoutSeconds` (`null` when configured value is `0`, the integer otherwise).
 - `AutoscalerLoop` receives the same pools, the `StrategyRegistry`, and the optional `PriorityArbiter` (only constructed when `total_cap` is set).
 - `Orchestrator` owns the run lifecycle: installs the SIGTERM handler, starts each loop participant, runs the React loop, and returns the exit code from `ShutdownState`.
 - `ServeCommand` is a one-line entrypoint that delegates to `Orchestrator::run()`.
 
-Transport, autoscaler, and strategy config objects (`TransportConfig`, `ConsumeArgs`, `AutoscalerConfig`, `StrategyConfig`) are value objects instantiated by the extension at container compile time. Transports without an `autoscaler` block synthesize an implicit `AutoscalerConfig::legacyFixed($processes)` so the arbiter sees a homogeneous list.
+Consumer, autoscaler, and strategy config objects (`ConsumerConfig`, `ConsumeArgs`, `AutoscalerConfig`, `StrategyConfig`) are value objects instantiated by the extension at container compile time. Consumers without an `autoscaler` block synthesize an implicit `AutoscalerConfig::legacyFixed($processes)` so the arbiter sees a homogeneous list.

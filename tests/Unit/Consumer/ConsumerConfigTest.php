@@ -2,24 +2,25 @@
 
 declare(strict_types=1);
 
-namespace SymfonyProcessManager\Tests\Unit\Transport;
+namespace SymfonyProcessManager\Tests\Unit\Consumer;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\Transport\ConsumeArgs;
-use SymfonyProcessManager\Transport\TransportConfig;
 
-#[CoversClass(TransportConfig::class)]
-final class TransportConfigTest extends TestCase
+#[CoversClass(ConsumerConfig::class)]
+final class ConsumerConfigTest extends TestCase
 {
     public function testCreateWithAllParameters(): void
     {
         $consumeArgs = ConsumeArgs::create(memoryLimit: 256);
         $autoscaler = AutoscalerConfig::legacyFixed(4);
 
-        $config = TransportConfig::create(
-            transport: 'async',
+        $config = ConsumerConfig::create(
+            label: 'ingest',
+            transports: ['orders', 'payments'],
             failureLimit: 5,
             failureWindowSeconds: 120,
             backoffBaseSeconds: 2,
@@ -29,7 +30,8 @@ final class TransportConfigTest extends TestCase
             autoscaler: $autoscaler,
         );
 
-        self::assertSame('async', $config->transport);
+        self::assertSame('ingest', $config->label);
+        self::assertSame(['orders', 'payments'], $config->transports);
         self::assertSame(5, $config->failureLimit);
         self::assertSame(120, $config->failureWindowSeconds);
         self::assertSame(2, $config->backoffBaseSeconds);
@@ -39,11 +41,26 @@ final class TransportConfigTest extends TestCase
         self::assertSame($autoscaler, $config->autoscaler);
     }
 
+    public function testCreateWithScalarTransportNormalizedToList(): void
+    {
+        $config = ConsumerConfig::create(label: 'failed', transports: 'failed');
+
+        self::assertSame(['failed'], $config->transports);
+    }
+
+    public function testCreateWithoutTransportsDefaultsToLabel(): void
+    {
+        $config = ConsumerConfig::create(label: 'async');
+
+        self::assertSame(['async'], $config->transports);
+    }
+
     public function testCreateWithDefaults(): void
     {
-        $config = TransportConfig::create(transport: 'async');
+        $config = ConsumerConfig::create(label: 'async');
 
-        self::assertSame('async', $config->transport);
+        self::assertSame('async', $config->label);
+        self::assertSame(['async'], $config->transports);
         self::assertSame(3, $config->failureLimit);
         self::assertSame(60, $config->failureWindowSeconds);
         self::assertSame(1, $config->backoffBaseSeconds);
@@ -56,7 +73,7 @@ final class TransportConfigTest extends TestCase
 
     public function testCreateWithNullConsumeArgsUsesEmptyDefault(): void
     {
-        $config = TransportConfig::create(transport: 'failed');
+        $config = ConsumerConfig::create(label: 'failed');
 
         self::assertNull($config->consumeArgs->memoryLimit);
         self::assertNull($config->consumeArgs->timeLimit);
@@ -74,8 +91,8 @@ final class TransportConfigTest extends TestCase
             queues: ['high'],
         );
 
-        $config = TransportConfig::create(
-            transport: 'priority',
+        $config = ConsumerConfig::create(
+            label: 'priority',
             consumeArgs: $consumeArgs,
         );
 
@@ -84,10 +101,20 @@ final class TransportConfigTest extends TestCase
         self::assertSame(['high'], $config->consumeArgs->queues);
     }
 
-    public function testTransportNameIsRequired(): void
+    public function testEmptyTransportListRejected(): void
     {
-        $config = TransportConfig::create(transport: 'notifications');
+        $this->expectException(\AssertionError::class);
 
-        self::assertSame('notifications', $config->transport);
+        new ConsumerConfig(
+            label: 'bad',
+            transports: [],
+            failureLimit: 3,
+            failureWindowSeconds: 60,
+            backoffBaseSeconds: 1,
+            backoffMaxSeconds: 30,
+            pollIntervalMs: 200,
+            consumeArgs: ConsumeArgs::create(),
+            autoscaler: AutoscalerConfig::legacyFixed(1),
+        );
     }
 }

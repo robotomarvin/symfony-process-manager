@@ -8,6 +8,6 @@ final readonly class WorkerMetadata
 {
     public function __construct(
         public int $workerId,
-        public string $transport,
+        public string $consumer,
     ) {}
 }

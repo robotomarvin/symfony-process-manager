@@ -8,7 +8,10 @@ framework:
         transports:
             async: 'doctrine://default?queue_name=async'
             scalable: 'doctrine://default?queue_name=scalable'
+            multi_a: 'doctrine://default?queue_name=multi_a'
+            multi_b: 'doctrine://default?queue_name=multi_b'
         routing:
             'SymfonyProcessManager\Tests\Fixtures\App\Message\FixtureMessage': async
             'SymfonyProcessManager\Tests\Fixtures\App\Message\ScalableMessage': scalable
+            'SymfonyProcessManager\Tests\Fixtures\App\Message\MultiTransportMessage': [multi_a, multi_b]
         stop_worker_on_signals: [SIGTERM, SIGINT]

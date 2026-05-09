@@ -20,8 +20,8 @@ This directory contains the technical specification for the `robotomarvin/symfon
 
 - **Command:** `bin/console pm:serve`
 - **Language/Runtime:** PHP 8.5+, Symfony 7.4, ReactPHP event loop
-- **Worker model:** N workers per transport, each running `messenger:consume`
+- **Worker model:** N workers per **consumer** (a logical pool), each running `messenger:consume <transports...>`. A consumer may read one transport or several. With multiple transports, Messenger polls them in list order and processes the first available message, so list order = priority order (earlier transports drain before later ones get a turn — not fair sharing).
 - **Restart policy:** Immediate on exit code 0; exponential backoff on non-zero; shutdown after failure limit
-- **IPC:** JSON messages on stdin/stdout with `@spm:` prefix
-- **Observability:** HTTP `/metrics` (Prometheus text), structured JSON logs enriched with `worker_id`
+- **IPC:** JSON messages on stdin/stdout with `@spm:` prefix; `MessengerEventMessage` carries `event` (received/handled/failed/retried) plus the receiver `transport` so multi-transport pools attribute work correctly
+- **Observability:** HTTP `/metrics` (Prometheus text), structured JSON logs enriched with `worker_id` and `consumer`
 - **Shutdown:** SIGTERM propagated to all workers; loop exits when all workers stop

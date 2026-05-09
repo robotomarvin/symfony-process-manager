@@ -62,11 +62,11 @@ Content-Type: text/plain; version=0.0.4
 
 # HELP worker_starts_total Total number of worker starts
 # TYPE worker_starts_total counter
-worker_starts_total{transport="async"} 3
+worker_starts_total{consumer="async"} 3
 
 # HELP messages_processed_total Total messages processed
 # TYPE messages_processed_total counter
-messages_processed_total{transport="async"} 142
+messages_processed_total{consumer="async",transport="async"} 142
 
 ...
 ```

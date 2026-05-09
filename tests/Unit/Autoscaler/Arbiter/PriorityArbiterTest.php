@@ -9,8 +9,8 @@ use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Autoscaler\Arbiter\PriorityArbiter;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\ProcessManager\WorkerPool;
-use SymfonyProcessManager\Transport\TransportConfig;
 
 #[CoversClass(PriorityArbiter::class)]
 final class PriorityArbiterTest extends TestCase
@@ -161,7 +161,7 @@ final class PriorityArbiterTest extends TestCase
             strategy: StrategyConfig::fixed($min),
         );
 
-        $config = TransportConfig::create(transport: $name, autoscaler: $autoscaler);
+        $config = ConsumerConfig::create(label: $name, autoscaler: $autoscaler);
 
         return new WorkerPool($config, 1);
     }

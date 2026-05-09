@@ -159,4 +159,12 @@ final class IpcCodecTest extends TestCase
     {
         self::assertNull($this->codec->decode('@spm:"just a string"'));
     }
+
+    public function testDecodeReturnsNullWhenFromArrayThrowsOnMalformedPayload(): void
+    {
+        $type = MessengerEventMessage::class;
+        $payload = '{"event":"handled","command":"App\\\\Message\\\\X"}'; // missing transport
+
+        self::assertNull($this->codec->decode("@spm:{\"type\":\"{$type}\",\"payload\":{$payload}}"));
+    }
 }

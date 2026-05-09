@@ -80,12 +80,22 @@ final class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                 ->end()
-                ->arrayNode('transports')
+                ->arrayNode('consumers')
                     ->isRequired()
                     ->requiresAtLeastOneElement()
                     ->useAttributeAsKey('name')
                     ->arrayPrototype()
                         ->children()
+                            ->arrayNode('transports')
+                                ->isRequired()
+                                ->requiresAtLeastOneElement()
+                                ->beforeNormalization()
+                                    ->ifString()
+                                    ->then(static fn(string $v): array => [$v])
+                                ->end()
+                                ->scalarPrototype()->end()
+                                ->info('One or more Symfony Messenger transport names this consumer reads from. Scalar accepted as shorthand for a single-element list.')
+                            ->end()
                             ->integerNode('processes')->defaultNull()->min(1)->end()
                             ->integerNode('failure_limit')->defaultValue(3)->min(1)->end()
                             ->integerNode('failure_window')->defaultValue(60)->min(1)->end()
@@ -163,7 +173,7 @@ final class Configuration implements ConfigurationInterface
                             ->ifTrue(static function (array $v): bool {
                                 return isset($v['autoscaler']) && $v['processes'] !== null;
                             })
-                            ->thenInvalid('Transport configuration cannot set both "processes" and "autoscaler".')
+                            ->thenInvalid('Consumer configuration cannot set both "processes" and "autoscaler".')
                         ->end()
                     ->end()
                 ->end()
@@ -175,12 +185,12 @@ final class Configuration implements ConfigurationInterface
                     }
 
                     $sum = 0;
-                    foreach ($v['transports'] as $transport) {
-                        if (isset($transport['autoscaler'])) {
-                            $sum += $transport['autoscaler']['min'];
+                    foreach ($v['consumers'] as $consumer) {
+                        if (isset($consumer['autoscaler'])) {
+                            $sum += $consumer['autoscaler']['min'];
                             continue;
                         }
-                        $sum += $transport['processes'] ?? 1;
+                        $sum += $consumer['processes'] ?? 1;
                     }
 
                     return $sum > $v['total_cap'];
@@ -188,12 +198,12 @@ final class Configuration implements ConfigurationInterface
                 ->then(static function (array $v): never {
                     $contributions = [];
                     $sum = 0;
-                    foreach ($v['transports'] as $name => $transport) {
-                        if (isset($transport['autoscaler'])) {
-                            $contribution = $transport['autoscaler']['min'];
+                    foreach ($v['consumers'] as $name => $consumer) {
+                        if (isset($consumer['autoscaler'])) {
+                            $contribution = $consumer['autoscaler']['min'];
                             $contributions[] = sprintf('%s min=%d', $name, $contribution);
                         } else {
-                            $contribution = $transport['processes'] ?? 1;
+                            $contribution = $consumer['processes'] ?? 1;
                             $contributions[] = sprintf('%s processes=%d', $name, $contribution);
                         }
                         $sum += $contribution;

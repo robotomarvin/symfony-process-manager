@@ -17,11 +17,13 @@ final class FixedStrategyTest extends TestCase
         $strategy = new FixedStrategy(count: 3);
 
         $snapshot = new PoolSnapshot(
-            transport: 'async',
+            consumer: 'async',
+            transports: ['async'],
             currentWorkers: 0,
             busyWorkers: 50,
             idleWorkers: 0,
             throughputPerSecond: 100.0,
+            throughputByTransport: ['async' => 100.0],
             queueDepth: null,
             min: 1,
             max: 10,
@@ -38,11 +40,13 @@ final class FixedStrategyTest extends TestCase
         $strategy = new FixedStrategy(count: 0);
 
         $snapshot = new PoolSnapshot(
-            transport: 'a',
+            consumer: 'a',
+            transports: ['a'],
             currentWorkers: 5,
             busyWorkers: 5,
             idleWorkers: 0,
             throughputPerSecond: 0.0,
+            throughputByTransport: ['a' => 0.0],
             queueDepth: null,
             min: 0,
             max: 10,

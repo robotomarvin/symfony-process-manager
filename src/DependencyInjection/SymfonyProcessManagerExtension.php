@@ -17,12 +17,12 @@ use SymfonyProcessManager\Autoscaler\AutoscalerLoop;
 use SymfonyProcessManager\Autoscaler\Strategy\ScalingStrategyInterface;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyRegistry;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\Http\HttpServer;
 use SymfonyProcessManager\Metrics\MessageClassResolver;
 use SymfonyProcessManager\ProcessManager\ProcessManagerLoop;
 use SymfonyProcessManager\ProcessManager\WorkerPool;
 use SymfonyProcessManager\Transport\ConsumeArgs;
-use SymfonyProcessManager\Transport\TransportConfig;
 use SymfonyProcessManager\Worker\WorkerIpcSubscriber;
 
 final class SymfonyProcessManagerExtension extends Extension
@@ -44,7 +44,7 @@ final class SymfonyProcessManagerExtension extends Extension
         $autoscalerInterval = $config['autoscaler_interval_sec'];
         $messages = $config['metrics']['messages'];
 
-        $poolDefinitions = $this->buildPoolDefinitions($container, $config['transports']);
+        $poolDefinitions = $this->buildPoolDefinitions($container, $config['consumers']);
 
         $container->getDefinition(MessageClassResolver::class)
             ->setArgument('$whitelist', $messages['whitelist']);
@@ -71,7 +71,7 @@ final class SymfonyProcessManagerExtension extends Extension
             $container->removeDefinition(PriorityArbiter::class);
         }
 
-        $strategyServiceMap = $this->collectServiceStrategyMap($config['transports']);
+        $strategyServiceMap = $this->collectServiceStrategyMap($config['consumers']);
         $strategyLocatorRefs = [];
         foreach (array_keys($strategyServiceMap) as $serviceId) {
             $strategyLocatorRefs[$serviceId] = new Reference($serviceId);
@@ -87,28 +87,28 @@ final class SymfonyProcessManagerExtension extends Extension
     }
 
     /**
-     * @param array<string, array{processes: ?int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, autoscaler?: array{min: int, max: int, priority: int, smoothing_window_sec: int, scale_up_cooldown_sec: int, scale_down_cooldown_sec: int, scale_up_step: int, scale_down_step: int, strategy: array{type: string, target?: ?float, scale_up_threshold?: ?float, scale_down_threshold?: ?float, id?: ?string}}, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}> $transports
+     * @param array<string, array{transports: list<string>, processes: ?int, failure_limit: int, failure_window: int, backoff_base: int, backoff_max: int, poll_interval_ms: int, autoscaler?: array{min: int, max: int, priority: int, smoothing_window_sec: int, scale_up_cooldown_sec: int, scale_down_cooldown_sec: int, scale_up_step: int, scale_down_step: int, strategy: array{type: string, target?: ?float, scale_up_threshold?: ?float, scale_down_threshold?: ?float, id?: ?string}}, consume_args: array{memory_limit: ?int, time_limit: ?int, limit: ?int, sleep: ?int, queues: list<string>, extra: list<string>}}> $consumers
      * @return list<Reference>
      */
-    private function buildPoolDefinitions(ContainerBuilder $container, array $transports): array
+    private function buildPoolDefinitions(ContainerBuilder $container, array $consumers): array
     {
         $pools = [];
         $startingId = 1;
 
-        foreach ($transports as $name => $transport) {
+        foreach ($consumers as $name => $consumer) {
             $consumeArgs = new Definition(ConsumeArgs::class);
             $consumeArgs->setFactory([ConsumeArgs::class, 'create']);
             $consumeArgs->setArguments([
-                $transport['consume_args']['memory_limit'],
-                $transport['consume_args']['time_limit'],
-                $transport['consume_args']['limit'],
-                $transport['consume_args']['sleep'],
-                $transport['consume_args']['queues'],
-                $transport['consume_args']['extra'],
+                $consumer['consume_args']['memory_limit'],
+                $consumer['consume_args']['time_limit'],
+                $consumer['consume_args']['limit'],
+                $consumer['consume_args']['sleep'],
+                $consumer['consume_args']['queues'],
+                $consumer['consume_args']['extra'],
             ]);
 
-            $autoscalerArr = $transport['autoscaler'] ?? null;
-            $processes = $transport['processes'] ?? 1;
+            $autoscalerArr = $consumer['autoscaler'] ?? null;
+            $processes = $consumer['processes'] ?? 1;
 
             if ($autoscalerArr !== null) {
                 $strategyConfig = $this->buildStrategyConfigDef($autoscalerArr['strategy'], $autoscalerArr['min']);
@@ -132,21 +132,22 @@ final class SymfonyProcessManagerExtension extends Extension
                 $initialWorkers = $processes;
             }
 
-            $transportConfig = new Definition(TransportConfig::class);
-            $transportConfig->setArguments([
+            $consumerConfig = new Definition(ConsumerConfig::class);
+            $consumerConfig->setArguments([
                 $name,
-                $transport['failure_limit'],
-                $transport['failure_window'],
-                $transport['backoff_base'],
-                $transport['backoff_max'],
-                $transport['poll_interval_ms'],
+                array_values($consumer['transports']),
+                $consumer['failure_limit'],
+                $consumer['failure_window'],
+                $consumer['backoff_base'],
+                $consumer['backoff_max'],
+                $consumer['poll_interval_ms'],
                 $consumeArgs,
                 $autoscalerDef,
             ]);
 
             $poolId = sprintf('symfony_process_manager.worker_pool.%s', $name);
             $poolDef = new Definition(WorkerPool::class);
-            $poolDef->setArguments([$transportConfig, $startingId]);
+            $poolDef->setArguments([$consumerConfig, $startingId]);
             $poolDef->setPublic(false);
             $container->setDefinition($poolId, $poolDef);
 
@@ -192,14 +193,14 @@ final class SymfonyProcessManagerExtension extends Extension
     }
 
     /**
-     * @param array<string, array{autoscaler?: array{strategy: array{type: string, id?: ?string}}}> $transports
-     * @return array<string, list<string>> Map of service ID to the transports that reference it.
+     * @param array<string, array{autoscaler?: array{strategy: array{type: string, id?: ?string}}}> $consumers
+     * @return array<string, list<string>> Map of service ID to the consumer labels that reference it.
      */
-    private function collectServiceStrategyMap(array $transports): array
+    private function collectServiceStrategyMap(array $consumers): array
     {
         $map = [];
-        foreach ($transports as $transportName => $transport) {
-            $strategy = $transport['autoscaler']['strategy'] ?? null;
+        foreach ($consumers as $consumerName => $consumer) {
+            $strategy = $consumer['autoscaler']['strategy'] ?? null;
             if (!is_array($strategy)) {
                 continue;
             }
@@ -210,7 +211,7 @@ final class SymfonyProcessManagerExtension extends Extension
             if ($serviceId === null || $serviceId === '') {
                 continue;
             }
-            $map[$serviceId][] = $transportName;
+            $map[$serviceId][] = $consumerName;
         }
 
         return $map;
