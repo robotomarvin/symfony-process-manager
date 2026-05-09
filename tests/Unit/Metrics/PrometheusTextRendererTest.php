@@ -177,4 +177,92 @@ final class PrometheusTextRendererTest extends TestCase
         self::assertStringContainsString('duration_sum{transport="async"} 0.05', $result);
         self::assertStringContainsString('duration_count{transport="async"} 1', $result);
     }
+
+    public function testCounterIntegerValueRendersWithoutDecimal(): void
+    {
+        $counter = new Counter('events', 'Events');
+
+        for ($i = 0; $i < 5; ++$i) {
+            $counter->increment();
+        }
+
+        $result = $this->renderer->render(['events' => $counter], []);
+
+        self::assertStringContainsString("events_total 5\n", $result);
+        self::assertStringNotContainsString('events_total 5.', $result);
+    }
+
+    public function testGaugeWholeFloatGetsDotZeroSuffix(): void
+    {
+        $gauge = new Gauge('workers', 'Workers');
+        $gauge->set(5.0);
+
+        $result = $this->renderer->render([], ['workers' => $gauge]);
+
+        self::assertStringContainsString("workers 5.0\n", $result);
+    }
+
+    public function testGaugeFractionalFloatPreserved(): void
+    {
+        $gauge = new Gauge('load', 'Load');
+        $gauge->set(0.125);
+
+        $result = $this->renderer->render([], ['load' => $gauge]);
+
+        self::assertStringContainsString("load 0.125\n", $result);
+    }
+
+    public function testCounterNoLabelsOmitsBraces(): void
+    {
+        $counter = new Counter('hits', 'Hits');
+        $counter->increment();
+
+        $result = $this->renderer->render(['hits' => $counter], []);
+
+        self::assertStringContainsString("hits_total 1\n", $result);
+        self::assertStringNotContainsString('{', $result);
+    }
+
+    public function testLabelKeysSortedAlphabetically(): void
+    {
+        $counter = new Counter('requests', 'Requests');
+        $counter->increment(['zone' => 'eu', 'app' => 'api', 'method' => 'GET']);
+
+        $result = $this->renderer->render(['requests' => $counter], []);
+
+        self::assertStringContainsString(
+            'requests_total{app="api",method="GET",zone="eu"} 1',
+            $result,
+        );
+    }
+
+    public function testCombinedEscapesInSingleLabelValue(): void
+    {
+        $counter = new Counter('test', 'test');
+        $counter->increment(['raw' => "path\\to\"file\nend"]);
+
+        $result = $this->renderer->render(['test' => $counter], []);
+
+        self::assertStringContainsString('raw="path\\\\to\\"file\\nend"', $result);
+    }
+
+    public function testNegativeGaugeValue(): void
+    {
+        $gauge = new Gauge('drift_seconds', 'Drift');
+        $gauge->set(-12.5);
+
+        $result = $this->renderer->render([], ['drift_seconds' => $gauge]);
+
+        self::assertStringContainsString("drift_seconds -12.5\n", $result);
+    }
+
+    public function testNegativeWholeFloatGaugeKeepsDotZero(): void
+    {
+        $gauge = new Gauge('offset', 'Offset');
+        $gauge->set(-5.0);
+
+        $result = $this->renderer->render([], ['offset' => $gauge]);
+
+        self::assertStringContainsString("offset -5.0\n", $result);
+    }
 }
