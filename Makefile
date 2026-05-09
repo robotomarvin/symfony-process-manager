@@ -1,8 +1,11 @@
 COMPOSE     = APP_UID=$(shell id -u) APP_GID=$(shell id -g) docker compose
 COMPOSE_MON = $(COMPOSE) --profile monitoring
 RUN         = $(COMPOSE) run --rm --remove-orphans
+EXEC        = $(COMPOSE) exec
+LOAD        = $(EXEC) app php tests/Fixtures/app/bin/console fixture:load
 
-.PHONY: help build up monitoring down shell install test cs cs-fix analyse check
+.PHONY: help build up monitoring down shell install test cs cs-fix analyse check \
+        demo-steady demo-burst demo-ramp demo-failures
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) \
@@ -50,3 +53,15 @@ analyse: install ## Run PHPStan static analysis
 	$(RUN) app composer analyse
 
 check: install analyse test ## Run all quality gates (analyse + test)
+
+demo-steady: ## Steady ~4 msg/s mixed traffic for 60s (needs 'make monitoring' running)
+	$(LOAD) --scenario=steady
+
+demo-burst: ## Burst 100 msgs every 30s for ~90s (needs 'make monitoring' running)
+	$(LOAD) --scenario=burst
+
+demo-ramp: ## Linear ramp 1->10 msg/s over 60s (needs 'make monitoring' running)
+	$(LOAD) --scenario=ramp
+
+demo-failures: ## 5 msg/s with 30% handler failures for 60s (needs 'make monitoring' running)
+	$(LOAD) --scenario=failures

@@ -157,9 +157,14 @@ The fixture app uses a Doctrine DBAL transport (SQLite) as the messenger backend
 | Payload | Behavior |
 |---|---|
 | `exit:N` | Exit with code N (tests failure/restart) |
+| `fail` | Throw a `RuntimeException` from the handler (tests `messenger_messages_failed_total` / retried) |
+| `sleep:S` | Sleep S seconds (tests in-flight gauge / busy worker) |
+| `sigterm-ignore` | Install `SIG_IGN` for SIGTERM/SIGINT and sleep (tests SIGKILL escalation) |
 | `stdout:plain` | Write a plain-text line to stdout (tests non-JSON output handling) |
 | `worker-id-check` | Log a JSON line; test asserts `worker_id` is present in the output |
 | *(any other)* | Log a standard handler success message |
+
+`ScalableMessageHandler` accepts `(sleepSeconds, shouldFail)`. The dispatcher defaults `shouldFail=false`; the load-scenario command (below) flips it on a configurable ratio to drive failure metrics on the autoscaled pool.
 
 ### JsonLogParser
 
@@ -229,6 +234,28 @@ $lines = $parser->all();                        // all parsed lines
 $line  = $parser->findByMessage('...');         // first matching line
 $line['extra']['worker_id'];                    // access fields
 ```
+
+---
+
+## Manual-Test Load Generation
+
+For interactive/manual exploration of the dashboard (Grafana under `make monitoring`), the fixture app ships a `fixture:load` console command and four scenario presets exposed as Make targets. Each scenario mixes both `async` (static pool) and `scalable` (autoscaled pool) traffic so every dashboard row lights up.
+
+| Target          | Scenario   | Pattern |
+|-----------------|------------|---------|
+| `make demo-steady`   | `steady`   | ~4 msg/s, 50/50 transport split, scalable handler sleeps 1s, ~5% handler failures, 60s. |
+| `make demo-burst`    | `burst`    | Cycles of "100 msgs at once, then idle 30s" for ~90s. Drives spikes + autoscaler scale-up cooldown. |
+| `make demo-ramp`     | `ramp`     | Linear ramp from 1 → 10 msg/s over 60s. Drives gradual autoscaler decisions. |
+| `make demo-failures` | `failures` | 5 msg/s with 30% handler failures for 60s. Drives `messenger_messages_failed_total` / retried / discarded. |
+
+The Make targets shell into the running `app` container via `docker compose exec`, so `make monitoring` (or `make up`) must be active first. Direct invocation:
+
+```bash
+make shell
+php tests/Fixtures/app/bin/console fixture:load --scenario=steady --duration=120
+```
+
+`fixture:load` is a manual-testing utility — it is not exercised by the PHPUnit suite. E2E coverage for the underlying dispatch path lives in `ProcessCommandTest` / `AutoscalerTest`.
 
 ---
 

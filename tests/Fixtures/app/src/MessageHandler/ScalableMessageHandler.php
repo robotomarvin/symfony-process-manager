@@ -17,10 +17,15 @@ final class ScalableMessageHandler
     {
         $this->logger->info('Scalable message handled.', [
             'sleep_seconds' => $message->sleepSeconds,
+            'should_fail' => $message->shouldFail,
         ]);
 
         if ($message->sleepSeconds > 0.0) {
             usleep((int) round($message->sleepSeconds * 1_000_000));
+        }
+
+        if ($message->shouldFail) {
+            throw new \RuntimeException('Scalable handler failure (intentional).');
         }
     }
 }

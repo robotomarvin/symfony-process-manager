@@ -6,5 +6,8 @@ namespace SymfonyProcessManager\Tests\Fixtures\App\Message;
 
 final class ScalableMessage
 {
-    public function __construct(public readonly float $sleepSeconds) {}
+    public function __construct(
+        public readonly float $sleepSeconds,
+        public readonly bool $shouldFail = false,
+    ) {}
 }

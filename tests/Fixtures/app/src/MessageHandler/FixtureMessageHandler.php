@@ -31,6 +31,11 @@ final class FixtureMessageHandler
             exit(1);
         }
 
+        if ($message->payload === 'fail') {
+            $this->logger->info('Fixture message requested handler failure.');
+            throw new \RuntimeException('Fixture handler failure (intentional).');
+        }
+
         if ($message->payload === 'sigterm-ignore') {
             pcntl_async_signals(false);
             pcntl_signal(SIGTERM, SIG_IGN);
