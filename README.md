@@ -101,6 +101,8 @@ symfony_process_manager:
 - `shutdown_timeout` (int seconds, default 30) — after SIGTERM is sent to workers, wait this many seconds before escalating to SIGKILL. Set to `0` to wait indefinitely.
 - `total_cap` (int|null, default null) — optional global ceiling on the sum of workers across all pools. When set, a `PriorityArbiter` shares the cap across pools by priority.
 - `autoscaler_interval_sec` (int seconds, default 10) — how often the autoscaler evaluates strategies and adjusts pool targets.
+- `http_server.host` (string, default `127.0.0.1`) — interface the health/metrics HTTP server binds to.
+- `http_server.port` (int, default `9100`) — port the health/metrics HTTP server listens on.
 
 ### Metrics Options
 
@@ -116,7 +118,7 @@ Each entry under `consumers` configures one pool of `messenger:consume <transpor
 
 - `transports` (string | list<string>, required) — one or more Symfony Messenger transport names this consumer reads from. A scalar is normalized to a one-element list (`transports: failed` ≡ `transports: [failed]`). Multi-transport consumers run a single PHP process per worker that polls all listed transports (`bin/console messenger:consume t1 t2 ...`). **List order is priority order**: Messenger polls transports in the order given and picks the first available message, so `t1` is fully drained before `t2` gets a turn — useful for primary/fallback (e.g. `[main, failed]`), not for fair sharing. If you need fair sharing, give each transport its own consumer. All other consumer fields apply to the whole pool — `consume_args` cannot vary per transport.
 
-Static (legacy) options:
+Static pool options:
 
 - `processes` (int, default 1)
 - `failure_limit` (int, default 3)
@@ -146,29 +148,33 @@ Static (legacy) options:
 - `scale_down_step` (int, default 1) — maximum workers removed per evaluation
 - `strategy.type` — one of:
   - `fixed` — always returns `min` workers (effectively pins the pool)
-  - `utilization` — returns `ceil(busy / target)`; default `target` is `0.7`
-  - `service` — references a custom strategy service via `strategy.id`; the service must implement `SymfonyProcessManager\Autoscaler\Strategy\ScalingStrategyInterface`
+  - `utilization` — scales by busy-worker ratio. Configure with either:
+    - `target` (float, default `0.7`) — single setpoint; returns `ceil(busy / target)`
+    - `scale_up_threshold` + `scale_down_threshold` (floats, 0.0–1.0; `down` ≤ `up`) — deadband mode. Scale up when utilization > `scale_up_threshold`, down when < `scale_down_threshold`, hold otherwise. Prevents flapping at steady-state.
+  - `service` — `strategy.id` (string, required) references a service implementing `SymfonyProcessManager\Autoscaler\Strategy\ScalingStrategyInterface`
 
 ## Usage
 
-In a Symfony application, you typically run:
-
 ```bash
-php /path/to/your/app/bin/console pm:serve
+php bin/console pm:serve
 ```
 
-In this repository (using the test fixture app), run:
-
-```bash
-php tests/Fixtures/app/bin/console pm:serve
-```
-
-This starts the HTTP server and begins supervising worker processes.
+Starts the HTTP server and begins supervising worker processes.
 
 ## HTTP Endpoints
 
 - `GET /` returns `{"status":"ok"}`
 - `GET /metrics` returns Prometheus text format
+
+## Monitoring Dashboard
+
+A ready-to-import **Symfony Process Manager** Grafana dashboard ships with the bundle. Panels cover process health, message throughput, worker lifecycle, and autoscaler decisions.
+
+![Grafana dashboard showing process status, message throughput, failures, retries, and message duration panels](docs/images/grafana-dashboard-messages.webp)
+
+![Grafana dashboard showing worker lifecycle and autoscaler panels](docs/images/grafana-dashboard-autoscaler.webp)
+
+Import it via **Dashboards → New → Import** in your Grafana, using [`docker/grafana/provisioning/dashboards/process-manager.json`](docker/grafana/provisioning/dashboards/process-manager.json). Point its Prometheus datasource at the instance scraping `pm:serve`'s `/metrics` endpoint.
 
 ## Output Behavior
 
@@ -258,74 +264,14 @@ Metric and log label changes that ship with the rename:
 - Non-JSON worker log lines are now prefixed `[worker N consumer-label]` (was `[worker N]`).
 - JSON log lines now carry both `extra.worker_id` and `extra.consumer`.
 
+## Specifications
+
+Deeper docs for runtime behavior, IPC, autoscaler internals, and metrics live in [`spec/`](spec/README.md).
+
 ## Development
 
-```bash
-composer cs
-composer analyse
-composer test
-composer check
-```
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the Docker toolchain, quality gates, demo traffic scenarios, and code/testing rules.
 
-### Docker Development
+## License
 
-The repository ships a PHP 8.5 image and a `Makefile` that wraps all common tasks. `vendor/` is kept in a named Docker volume — no host writes, no macOS bind-mount slowness.
-
-```bash
-make help        # list all available targets
-make build       # build the Docker image
-make up          # start app only (detached)
-make monitoring  # start app + prometheus + grafana (detached)
-make down        # stop all containers
-make shell       # open an interactive shell in the app container
-make install     # run composer install inside the container
-```
-
-#### Services
-
-| Service    | Profile      | Host Port (default) | Description                                   |
-|------------|--------------|---------------------|-----------------------------------------------|
-| app        | _(default)_  | ephemeral (0)       | Process Manager — health (`/`) + metrics (`/metrics`) |
-| prometheus | `monitoring` | ephemeral (0)       | Prometheus — scrapes `app:9100/metrics`       |
-| grafana    | `monitoring` | ephemeral (0)       | Grafana — pre-configured Prometheus datasource |
-
-`prometheus` and `grafana` only start when the `monitoring` profile is active (via `make monitoring`). Ports default to `0` (OS-assigned ephemeral). Fix them when you need stable URLs:
-
-```bash
-PM_HOST_PORT=9100 PROMETHEUS_HOST_PORT=9090 GRAFANA_HOST_PORT=3000 make monitoring
-curl http://localhost:9100/metrics
-# Grafana opens the Process Manager dashboard directly (anonymous, no login)
-open http://localhost:3000
-```
-
-The provisioned **Symfony Process Manager** dashboard ships rows for stats, messages, worker lifecycle, **autoscaler** (target vs current workers, pool utilization, busy/idle stack, scale events, skipped decisions by reason), and worker liveness. See `spec/metrics.md` for the panel-to-metric mapping.
-
-#### Generating Demo Traffic
-
-The dashboard panels need sustained, mixed traffic to come alive. Four scenario presets ship with the fixture app — each mixes async (static pool) and scalable (autoscaled pool) traffic:
-
-```bash
-make demo-steady    # ~4 msg/s mixed, ~5% failures, 60s
-make demo-burst     # 100-msg bursts every 30s, ~90s
-make demo-ramp      # 1 → 10 msg/s linear ramp over 60s
-make demo-failures  # 5 msg/s with 30% handler failures, 60s
-```
-
-These exec into the running `app` container, so `make monitoring` (or `make up`) must be active first. For custom durations:
-
-```bash
-make shell
-php tests/Fixtures/app/bin/console fixture:load --scenario=ramp --duration=180
-```
-
-#### Running Quality Gates
-
-```bash
-make test       # PHPUnit (E2E tests bind HTTP to 127.0.0.1:0 inside the container)
-make cs         # php-cs-fixer check
-make cs-fix     # php-cs-fixer fix
-make analyse    # PHPStan
-make check      # analyse + test
-```
-
-See `CONTRIBUTING.md` for code and testing rules.
+MIT

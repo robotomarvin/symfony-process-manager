@@ -6,19 +6,36 @@ Always read `CONTRIBUTING.md` before making code changes.
 
 ## What This Is
 
-A Symfony 7.4 bundle (PHP 8.5+) that supervises Symfony Messenger `messenger:consume` worker processes using a ReactPHP event-loop. It spawns configurable worker counts per transport, handles graceful shutdown on SIGTERM, implements exponential backoff on failures, and exposes HTTP health/metrics endpoints.
+A Symfony 7.4 bundle (PHP 8.5+) that supervises Symfony Messenger `messenger:consume` worker processes using a ReactPHP event-loop. It spawns configurable worker counts per **consumer** (each consumer reads one or more transports), handles graceful shutdown on SIGTERM, implements exponential backoff on failures, and exposes HTTP health/metrics endpoints.
+
+## Audience Boundary
+
+`README.md` is user-facing — for application developers consuming this bundle. **Do NOT add `make` targets, the `Makefile` itself, or anything from `tests/Fixtures/app/` to `README.md`.** That toolchain (Docker, `make monitoring`, `make demo-*`, the fixture app) exists only for developers of this library and lives in `CONTRIBUTING.md`. User-facing docs reference `bin/console pm:serve`, bundle config, metrics, and HTTP endpoints — nothing else.
 
 ## Commands
 
-See `CONTRIBUTING.md` for the full list of composer scripts. Quick reference for running individual tests:
+**Use the `Makefile` as the canonical entry point.** It wraps Docker Compose so commands run in the project's containerized toolchain (correct PHP version, extensions, vendor volume). Do NOT shell out to `composer`, `./vendor/bin/phpunit`, or `php-cs-fixer` directly on the host — they may not exist or may use the wrong runtime.
+
+Run `make help` to list targets. Common ones:
 
 ```bash
-# Single test file
-./vendor/bin/phpunit tests/Unit/Command/Serve/ProcessManagerLoopTest.php
+make install   # composer install (in container)
+make test      # PHPUnit (E2E binds 127.0.0.1:0)
+make cs        # coding standards check
+make cs-fix    # auto-fix coding standards
+make analyse   # PHPStan
+make check     # analyse + test (full quality gate)
+make shell     # interactive shell in app container
+```
 
-# Single test method
+Running a single test still goes through the container — open `make shell`, then:
+
+```bash
+./vendor/bin/phpunit tests/Unit/Command/Serve/ProcessManagerLoopTest.php
 ./vendor/bin/phpunit --filter testSingleWorkerFailureLimitTriggersShutdown
 ```
+
+If a workflow needs a target the Makefile lacks, add it to the Makefile rather than bypassing it.
 
 ## Architecture
 
@@ -32,7 +49,7 @@ See `CONTRIBUTING.md` for the full list of composer scripts. Quick reference for
 - `WorkerState` — mutable state per worker (process handle, failure timestamps, scheduled restart time, stop signals)
 - `WorkerProcessFactory` (behind `WorkerProcessFactoryInterface`) — creates `symfony/process` instances for `messenger:consume`
 - `WorkerOutputHandler` — buffers stdout/stderr per worker, flushes on exit
-- `WorkerOutputFormatter` — enriches JSON log lines with `worker_id`, prefixes non-JSON lines with `[worker N]`
+- `WorkerOutputFormatter` — enriches JSON log lines with `worker_id` and `consumer`, prefixes non-JSON lines with `[worker N <consumer>]`
 
 ### Shutdown
 `ShutdownState` tracks whether shutdown was requested and why (`ShutdownReason::SIGNAL` or `FAILURE_LIMIT`). The loop sends SIGTERM to all workers and waits for them to exit.
@@ -41,7 +58,29 @@ See `CONTRIBUTING.md` for the full list of composer scripts. Quick reference for
 `HttpServer` (ReactPHP) serves `GET /` (health) and `GET /metrics` (Prometheus text format). `MetricsRegistry` holds `Counter` and `Gauge` instances; `PrometheusTextRenderer` formats output.
 
 ### Configuration & DI
-`Configuration` defines the bundle config schema. `SymfonyProcessManagerExtension` loads `services.yaml` and wires transport configs + HTTP settings into `ServeCommand`. Value objects `TransportConfig` and `ConsumeArgs` are immutable (`readonly`) with factory methods.
+`Configuration` defines the bundle config schema. `SymfonyProcessManagerExtension` loads `services.yaml` and wires consumer configs + HTTP settings into `ServeCommand`. Value objects `ConsumerConfig` and `ConsumeArgs` are immutable (`readonly`) with factory methods.
+
+## Specification Docs (`spec/`)
+
+`spec/` is the **source of truth** for runtime behavior, configuration schema, IPC, metrics, HTTP API, autoscaler, shutdown, and worker lifecycle. Index lives in `spec/README.md`. Files: `architecture.md`, `configuration.md`, `autoscaler.md`, `worker-lifecycle.md`, `ipc-protocol.md`, `http-api.md`, `metrics.md`, `shutdown.md`, `testing.md`.
+
+**Rule: code and spec change together.** Any PR that alters observable behavior MUST update the matching spec file in the same change. Spec drift is a bug.
+
+Triggers — if your change touches any of these, update `spec/`:
+
+| Change | Update |
+|---|---|
+| Bundle config schema (`Configuration.php`, consumer options, autoscaler knobs) | `configuration.md`, `autoscaler.md` if scaling-related |
+| New/changed metric, label, or semantics | `metrics.md` |
+| HTTP route, response shape, status code | `http-api.md` |
+| IPC message format, prefix, or direction | `ipc-protocol.md` |
+| Worker restart/backoff/failure-limit logic | `worker-lifecycle.md` |
+| Shutdown trigger, signal handling, drain order | `shutdown.md` |
+| Autoscaler strategy, EWMA, arbitration, thresholds | `autoscaler.md` |
+| New component, dependency direction, or runtime data flow | `architecture.md` |
+| New test util, fake, or testing convention | `testing.md` |
+
+Before declaring work complete, grep the spec for terms you renamed/removed and confirm no stale references remain. `README.md` user-facing docs also stay in sync (per `CONTRIBUTING.md`).
 
 ## Testing Notes
 
@@ -51,23 +90,7 @@ Code conventions and testing rules are in `CONTRIBUTING.md`. Additional context 
 - E2E tests use `ConsoleProcessRunner`/`ConsoleProcessSession` to spawn real `pm:serve` processes and `JsonLogParser` to validate output
 - Test fixtures app lives in `tests/Fixtures/app/` (minimal Symfony app with Doctrine messenger transport)
 
-## Issue Tracking (Beads)
-
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd create "Title" -p 0 # Create a new issue (P0 example)
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd dep add <child> <parent>  # Mark parent blocked by child
-bd sync               # Sync with git
-```
-
-### Epics, Tasks, Sub-tasks (Hierarchy)
+## Beads — Epics, Tasks, Sub-tasks (Hierarchy)
 
 Beads supports hierarchical IDs for epics and sub-issues:
 
@@ -84,34 +107,6 @@ Beads supports hierarchical IDs for epics and sub-issues:
 - When you split work, the parent issue must be blocked by its children (use `bd dep add <child> <parent>`).
 - A parent issue is only closed after all sub-issues are closed.
 - Keep sub-issues small and independently completable (one primary outcome per issue).
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work**
-   - Create issues for anything that needs follow-up
-   - If follow-up work is part of the current epic, create it as a sub-issue (hierarchical ID) and link it so it blocks the parent (`bd dep add <child> <parent>`)
-2. **Run quality gates** (if code changed) - `composer check` must pass
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
