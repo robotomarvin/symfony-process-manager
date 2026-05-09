@@ -15,6 +15,7 @@
 /Makefile               export-ignore
 /compose.yaml           export-ignore
 /docker                 export-ignore
+/docs                   export-ignore
 /phpstan.neon           export-ignore
 /phpunit.xml            export-ignore
 /spec                   export-ignore
