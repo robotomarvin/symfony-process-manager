@@ -478,6 +478,91 @@ final class ConfigurationTest extends TestCase
         ]);
     }
 
+    public function testHttpServerPortZeroIsValid(): void
+    {
+        $config = $this->process([
+            'http_server' => ['port' => 0],
+            'consumers' => ['async' => ['transports' => 'async']],
+        ]);
+
+        self::assertSame(0, $config['http_server']['port']);
+    }
+
+    public function testHttpServerNegativePortIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'http_server' => ['port' => -1],
+            'consumers' => ['async' => ['transports' => 'async']],
+        ]);
+    }
+
+    public function testScaleUpThresholdAboveOneIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'consumers' => [
+                'async' => [
+                    'transports' => 'async',
+                    'autoscaler' => [
+                        'min' => 1,
+                        'max' => 5,
+                        'strategy' => [
+                            'type' => 'utilization',
+                            'scale_up_threshold' => 1.5,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    public function testScaleDownThresholdBelowZeroIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'consumers' => [
+                'async' => [
+                    'transports' => 'async',
+                    'autoscaler' => [
+                        'min' => 1,
+                        'max' => 5,
+                        'strategy' => [
+                            'type' => 'utilization',
+                            'scale_down_threshold' => -0.1,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
+    public function testScaleDownAboveScaleUpIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('strategy.scale_down_threshold must be <= scale_up_threshold.');
+
+        $this->process([
+            'consumers' => [
+                'async' => [
+                    'transports' => 'async',
+                    'autoscaler' => [
+                        'min' => 1,
+                        'max' => 5,
+                        'strategy' => [
+                            'type' => 'utilization',
+                            'scale_up_threshold' => 0.7,
+                            'scale_down_threshold' => 0.9,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+    }
+
     /**
      * @param array<string, mixed> $config
      * @return array{

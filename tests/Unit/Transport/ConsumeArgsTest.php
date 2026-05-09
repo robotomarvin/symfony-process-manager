@@ -118,4 +118,21 @@ final class ConsumeArgsTest extends TestCase
             '--custom',
         ], $args->toCliArguments());
     }
+
+    public function testToCliArgumentsEmitsZeroMemoryAndTimeLimits(): void
+    {
+        $args = ConsumeArgs::create(
+            memoryLimit: 0,
+            timeLimit: 0,
+            limit: 0,
+            sleep: 0,
+        );
+
+        self::assertSame([
+            '--memory-limit', '0',
+            '--time-limit', '0',
+            '--limit', '0',
+            '--sleep', '0',
+        ], $args->toCliArguments());
+    }
 }
