@@ -147,6 +147,55 @@ final class PriorityArbiterTest extends TestCase
         $arbiter->allocate(['a' => 3, 'b' => 3], ['a' => $a, 'b' => $b]);
     }
 
+    public function testMinEqualsMaxEqualsCapAllocatesExactlyWithNoLeftover(): void
+    {
+        $a = $this->makePool('a', min: 3, max: 3, priority: 0);
+        $b = $this->makePool('b', min: 2, max: 2, priority: 0);
+
+        $arbiter = new PriorityArbiter(5);
+        $allocated = $arbiter->allocate(['a' => 5, 'b' => 5], ['a' => $a, 'b' => $b]);
+
+        // Sum of mins == cap, so demand above min is satisfied as 0; allocation == mins exactly.
+        self::assertSame(['a' => 3, 'b' => 2], $allocated);
+        self::assertSame(5, array_sum($allocated));
+    }
+
+    public function testHigherPriorityWithZeroAboveMinDemandLeavesCapForLowerPriority(): void
+    {
+        // High-priority pool wants exactly its min → zero above-min demand, group skipped.
+        // Lower-priority pool then receives the leftover capacity.
+        $high = $this->makePool('high', min: 2, max: 5, priority: 100);
+        $low = $this->makePool('low', min: 1, max: 10, priority: 0);
+
+        $arbiter = new PriorityArbiter(8);
+        $allocated = $arbiter->allocate(['high' => 2, 'low' => 8], ['high' => $high, 'low' => $low]);
+
+        self::assertSame(2, $allocated['high']);
+        // Cap 8 - mins (2+1) = 5 leftover. low wants 8 (above-min = 7) → capped at remaining 5.
+        self::assertSame(6, $allocated['low']);
+    }
+
+    public function testThreePriorityTiersCascadeHighestFirst(): void
+    {
+        $top = $this->makePool('top', min: 1, max: 10, priority: 100);
+        $mid = $this->makePool('mid', min: 1, max: 10, priority: 50);
+        $low = $this->makePool('low', min: 1, max: 10, priority: 0);
+
+        // Cap 7. After mins (3) → 4 leftover.
+        // Each pool wants 5 (above-min = 4).
+        // top group consumes its 4 (totalDemand 4 ≤ remaining 4). mid + low get 0.
+        $arbiter = new PriorityArbiter(7);
+        $allocated = $arbiter->allocate(
+            ['top' => 5, 'mid' => 5, 'low' => 5],
+            ['top' => $top, 'mid' => $mid, 'low' => $low],
+        );
+
+        self::assertSame(5, $allocated['top']);
+        self::assertSame(1, $allocated['mid']);
+        self::assertSame(1, $allocated['low']);
+        self::assertSame(7, array_sum($allocated));
+    }
+
     private function makePool(string $name, int $min, int $max, int $priority): WorkerPool
     {
         $autoscaler = new AutoscalerConfig(

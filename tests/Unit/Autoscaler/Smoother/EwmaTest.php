@@ -67,6 +67,37 @@ final class EwmaTest extends TestCase
         self::assertSame(0.0, $ewma->value());
     }
 
+    public function testNegativeDeltaSecondsIsNoOp(): void
+    {
+        $ewma = new Ewma(timeConstantSeconds: 30.0);
+        $ewma->update(0.0, 0.0);
+        $ewma->update(10.0, 1.0); // seed real value
+        $before = $ewma->value();
+
+        $ewma->update(-5.0, 999.0);
+
+        self::assertSame($before, $ewma->value());
+    }
+
+    public function testTinyTimeConstantConvergesNearInstantly(): void
+    {
+        // alpha = 1 - exp(-deltaSeconds / timeConstant). With τ ≪ Δt, alpha → 1
+        // and the new sample dominates.
+        $ewma = new Ewma(timeConstantSeconds: 0.001);
+        $ewma->update(0.0, 0.0);
+        $ewma->update(1.0, 100.0);
+
+        self::assertEqualsWithDelta(100.0, $ewma->value(), 0.0001);
+    }
+
+    public function testValueIsZeroBeforeFirstSample(): void
+    {
+        $ewma = new Ewma(timeConstantSeconds: 5.0);
+
+        self::assertSame(0.0, $ewma->value());
+        self::assertFalse($ewma->hasSample());
+    }
+
     public function testIrregularIntervalsRespectTimeWeighting(): void
     {
         $ewma = new Ewma(timeConstantSeconds: 10.0);
