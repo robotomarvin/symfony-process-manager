@@ -76,39 +76,34 @@ The codec decodes a line by:
 
 ---
 
-### ProcessedCommandMessage
-
-**Direction:** Worker → Manager  
-**Purpose:** Reports the outcome of a Messenger message that was handled or failed.  
-**Payload:**
-
-| Field | Type | Description |
-|---|---|---|
-| `status` | `string` | `"handled"` or `"failed"` |
-| `command` | `string` | Fully-qualified class name of the handled message |
-| `errorInfo` | `string\|null` | Error description if status is `"failed"` (max 500 chars) |
-
-```json
-@spm:{"type":"RobotoMarvin\\SymfonyProcessManager\\Ipc\\Message\\ProcessedCommandMessage","payload":{"status":"handled","command":"App\\Message\\MyMessage","errorInfo":null}}
-```
-
-**Manager handling:** marks the worker `Idle` (autoscaler signal) and increments `messages_processed_total` on `handled`.
-
----
-
-### WorkerStartedHandlingMessage
+### MessengerEventMessage
 
 **Direction:** Worker → Manager
-**Purpose:** Reports that a worker is about to dispatch a message to the bus. Drives the autoscaler's busy/idle signal without depending on stdin reads (which are blocked while a handler runs).
+**Purpose:** Single envelope reporting every Messenger lifecycle event the worker observes (received / handled / failed / retried). Replaces the earlier split between `WorkerStartedHandlingMessage` and `ProcessedCommandMessage`.
 **Payload:**
 
 | Field | Type | Description |
 |---|---|---|
-| `command` | `string` | Fully-qualified class name of the message about to be handled |
+| `event` | `string` | One of `"received"`, `"handled"`, `"failed"`, `"retried"` |
+| `command` | `string` | Fully-qualified class name of the message being handled |
+| `transport` | `string` | Receiver name reported by the worker — `WorkerMessage(Received\|Handled\|Failed\|Retried)Event::getReceiverName()`. Identifies which transport delivered the message in a multi-transport consumer. **Required and non-empty** — payloads with a missing or empty `transport` are dropped at decode time. |
+| `duration_seconds` | `float\|null` | Elapsed wall-clock seconds between `received` and the terminating event. Set on `handled` and `failed`; absent on `received` and `retried`. |
+| `error_class` | `string\|null` | FQCN of the throwable that caused the failure. Set on `failed`; absent otherwise. Carried in the IPC payload but not currently exposed as a metric label (see `spec/metrics.md`). |
 
-Emitted by `WorkerIpcSubscriber::onMessageReceived(WorkerMessageReceivedEvent)`, which fires *before* the bus dispatches the message.
+```json
+@spm:{"type":"RobotoMarvin\\SymfonyProcessManager\\Ipc\\Message\\MessengerEventMessage","payload":{"event":"handled","command":"App\\Message\\MyMessage","transport":"orders","duration_seconds":0.042}}
+```
 
-**Manager handling:** marks the worker `Busy` and sets `worker_busy{worker, transport} = 1`. The matching `ProcessedCommandMessage` (handled or failed) flips it back to idle.
+**Manager handling per `event`:**
+
+| Event | State change | Metrics |
+|---|---|---|
+| `received` | mark worker `Busy` | set `worker_busy{worker, consumer, transport}=1`; `messenger_messages_in_flight{transport}` += 1 |
+| `handled` | mark worker `Idle` | set `worker_busy{...}=0`; `messages_processed_total{consumer, transport}` += 1; `messenger_messages_processed_total{transport, message_class}` += 1; observe `messenger_message_duration_seconds`; `messenger_messages_in_flight{transport}` -= 1; record per-transport throughput on the pool's EWMA |
+| `failed` | mark worker `Idle` | set `worker_busy{...}=0`; `messenger_messages_failed_total{transport, message_class}` += 1; observe `messenger_message_duration_seconds`; `messenger_messages_in_flight{transport}` -= 1; record per-transport throughput on the pool's EWMA |
+| `retried` | (no change) | `messenger_messages_retried_total{transport, message_class}` += 1 |
+
+The full Messenger metrics suite (`messenger_*`) is gated by `metrics.messages.enabled`; the per-pool signals (`worker_busy`, `messages_processed_total`, throughput EWMA) are unconditional.
 
 ---
 
@@ -163,9 +158,10 @@ The manager drains the IPC queue each tick via `WorkerOutputHandler::getAndClear
 | Event | Handler |
 |---|---|
 | `WorkerRunningEvent` | `onWorkerRunning()` — reads pending IPC messages from stdin |
-| `WorkerMessageReceivedEvent` | `onMessageReceived()` — sends `WorkerStartedHandlingMessage` |
-| `WorkerMessageHandledEvent` | `onMessageHandled()` — sends `ProcessedCommandMessage(status=handled)` |
-| `WorkerMessageFailedEvent` | `onMessageFailed()` — sends `ProcessedCommandMessage(status=failed)` |
+| `WorkerMessageReceivedEvent` | `onMessageReceived()` — sends `MessengerEventMessage(event=received)`, records start time keyed by message identity |
+| `WorkerMessageHandledEvent` | `onMessageHandled()` — sends `MessengerEventMessage(event=handled, duration_seconds)` |
+| `WorkerMessageFailedEvent` | `onMessageFailed()` — sends `MessengerEventMessage(event=failed, duration_seconds, error_class)` |
+| `WorkerMessageRetriedEvent` | `onMessageRetried()` — sends `MessengerEventMessage(event=retried)`, drops the recorded start time |
 
 ### Stdin Reading
 
@@ -201,7 +197,7 @@ The ping interval is intentionally much longer than the tick interval so pings d
 
 The codec can be constructed with an `allowedTypes` list (fully-qualified class names). If the list is non-empty, messages whose `type` is not in the list are silently dropped. This allows the manager-side and worker-side codecs to be separately configured to accept only the types they care about:
 
-- Manager codec: accepts `PongMessage`, `ProcessedCommandMessage`.
+- Manager codec: accepts `PongMessage`, `MessengerEventMessage`.
 - Worker codec: accepts `PingMessage`.
 
 In the current service wiring, both sides use the same codec with all types allowed.

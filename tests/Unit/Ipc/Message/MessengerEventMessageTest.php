@@ -60,14 +60,55 @@ final class MessengerEventMessageTest extends TestCase
         self::assertNull($restored->errorClass);
     }
 
-    public function testFromArrayHandlesMissingFields(): void
+    public function testFromArrayRejectsMissingEvent(): void
     {
-        $message = MessengerEventMessage::fromArray([]);
+        $this->expectException(\InvalidArgumentException::class);
 
-        self::assertSame('', $message->event);
-        self::assertSame('', $message->command);
-        self::assertSame('', $message->transport);
-        self::assertNull($message->durationSeconds);
-        self::assertNull($message->errorClass);
+        MessengerEventMessage::fromArray([
+            'command' => 'App\\Message\\Foo',
+            'transport' => 'async',
+        ]);
+    }
+
+    public function testFromArrayRejectsUnknownEvent(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        MessengerEventMessage::fromArray([
+            'event' => 'bogus',
+            'command' => 'App\\Message\\Foo',
+            'transport' => 'async',
+        ]);
+    }
+
+    public function testFromArrayRejectsMissingCommand(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        MessengerEventMessage::fromArray([
+            'event' => MessengerEventMessage::EVENT_RECEIVED,
+            'transport' => 'async',
+        ]);
+    }
+
+    public function testFromArrayRejectsEmptyTransport(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        MessengerEventMessage::fromArray([
+            'event' => MessengerEventMessage::EVENT_HANDLED,
+            'command' => 'App\\Message\\Foo',
+            'transport' => '',
+        ]);
+    }
+
+    public function testFromArrayRejectsMissingTransport(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        MessengerEventMessage::fromArray([
+            'event' => MessengerEventMessage::EVENT_HANDLED,
+            'command' => 'App\\Message\\Foo',
+        ]);
     }
 }

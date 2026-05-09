@@ -9,5 +9,8 @@ use SymfonyProcessManager\Transport\ConsumeArgs;
 
 interface WorkerProcessFactoryInterface
 {
-    public function create(string $transport, ConsumeArgs $consumeArgs): Process;
+    /**
+     * @param list<string> $transports
+     */
+    public function create(array $transports, ConsumeArgs $consumeArgs): Process;
 }

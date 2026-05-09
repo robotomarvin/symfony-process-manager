@@ -9,10 +9,15 @@ symfony_process_manager:
     http_server:
         host: '%env(default:symfony_process_manager_fixture_http_host:PM_HTTP_HOST)%'
         port: '%env(int:default:symfony_process_manager_fixture_http_port:PM_HTTP_PORT)%'
-    transports:
+    consumers:
         async:
+            transports: async
+            processes: 1
+        multi:
+            transports: [multi_a, multi_b]
             processes: 1
         scalable:
+            transports: scalable
             autoscaler:
                 min: 1
                 max: 3
@@ -29,4 +34,4 @@ symfony_process_manager:
 
 when@test_capped:
     symfony_process_manager:
-        total_cap: 2
+        total_cap: 3

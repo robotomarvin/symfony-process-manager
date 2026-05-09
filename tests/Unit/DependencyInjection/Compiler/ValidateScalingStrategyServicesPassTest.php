@@ -53,7 +53,7 @@ final class ValidateScalingStrategyServicesPassTest extends TestCase
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('app.missing');
-        $this->expectExceptionMessage('async, priority');
+        $this->expectExceptionMessage('consumer(s) [async, priority]');
 
         (new ValidateScalingStrategyServicesPass())->process($container);
     }
@@ -66,6 +66,7 @@ final class ValidateScalingStrategyServicesPassTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage(ScalingStrategyInterface::class);
         $this->expectExceptionMessage(ScalingStrategyInterface::TAG);
+        $this->expectExceptionMessage('consumer(s) [async]');
 
         (new ValidateScalingStrategyServicesPass())->process($container);
     }

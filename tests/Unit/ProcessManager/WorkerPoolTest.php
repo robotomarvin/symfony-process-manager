@@ -8,8 +8,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\ProcessManager\WorkerPool;
-use SymfonyProcessManager\Transport\TransportConfig;
 
 #[CoversClass(WorkerPool::class)]
 final class WorkerPoolTest extends TestCase
@@ -186,11 +186,71 @@ final class WorkerPoolTest extends TestCase
         $pool = $this->buildPool(min: 1, max: 5, smoothingWindowSec: 1);
 
         $pool->sample(0.0);
-        $pool->recordMessageProcessed();
-        $pool->recordMessageProcessed();
+        $pool->recordMessageProcessed('async');
+        $pool->recordMessageProcessed('async');
         $pool->sample(1.0);
 
         self::assertGreaterThan(0.0, $pool->smoothedThroughput());
+    }
+
+    public function testLabelAndTransportsExposeConsumerIdentity(): void
+    {
+        $autoscaler = AutoscalerConfig::legacyFixed(1);
+        $config = ConsumerConfig::create(
+            label: 'ingest',
+            transports: ['orders', 'payments'],
+            autoscaler: $autoscaler,
+        );
+        $pool = new WorkerPool($config, 1);
+
+        self::assertSame('ingest', $pool->label());
+        self::assertSame(['orders', 'payments'], $pool->transports());
+    }
+
+    public function testPerTransportThroughputIsTrackedSeparately(): void
+    {
+        $autoscaler = new AutoscalerConfig(
+            min: 1,
+            max: 5,
+            priority: 0,
+            smoothingWindowSec: 1,
+            scaleUpCooldownSec: 0,
+            scaleDownCooldownSec: 0,
+            scaleUpStep: 1,
+            scaleDownStep: 1,
+            strategy: StrategyConfig::utilization(),
+        );
+        $config = ConsumerConfig::create(
+            label: 'ingest',
+            transports: ['orders', 'payments'],
+            autoscaler: $autoscaler,
+        );
+        $pool = new WorkerPool($config, 1);
+
+        $pool->sample(0.0);
+        $pool->recordMessageProcessed('orders');
+        $pool->recordMessageProcessed('orders');
+        $pool->recordMessageProcessed('payments');
+        $pool->sample(1.0);
+
+        $perTransport = $pool->smoothedThroughputByTransport();
+        self::assertArrayHasKey('orders', $perTransport);
+        self::assertArrayHasKey('payments', $perTransport);
+        self::assertGreaterThan($perTransport['payments'], $perTransport['orders']);
+
+        // Aggregate sums per-transport rates.
+        self::assertGreaterThan(0.0, $pool->smoothedThroughput());
+    }
+
+    public function testRecordMessageProcessedForUnknownTransportIsIgnored(): void
+    {
+        $pool = $this->buildPool(min: 1, max: 5, smoothingWindowSec: 1);
+
+        $pool->sample(0.0);
+        $pool->recordMessageProcessed('not-configured');
+        $pool->sample(1.0);
+
+        self::assertSame(0.0, $pool->smoothedThroughput());
     }
 
     public function testRecentFailureCountAggregatesPerWorker(): void
@@ -282,7 +342,7 @@ final class WorkerPoolTest extends TestCase
             strategy: StrategyConfig::utilization(),
         );
 
-        $config = TransportConfig::create(transport: 'async', autoscaler: $autoscaler);
+        $config = ConsumerConfig::create(label: 'async', autoscaler: $autoscaler);
 
         return new WorkerPool($config, $startingId);
     }

@@ -18,6 +18,9 @@ final class WorkerOutputHandler
     /** @var array<int, list<IpcMessage>> */
     private array $ipcQueues = [];
 
+    /** @var array<int, string> */
+    private array $consumerByWorker = [];
+
     /** @var resource */
     private mixed $stdoutStream;
 
@@ -39,6 +42,16 @@ final class WorkerOutputHandler
 
         assert(\is_resource($this->stdoutStream), 'stdoutStream must be a resource');
         assert(\is_resource($this->stderrStream), 'stderrStream must be a resource');
+    }
+
+    public function registerWorker(int $workerId, string $consumerLabel): void
+    {
+        $this->consumerByWorker[$workerId] = $consumerLabel;
+    }
+
+    public function unregisterWorker(int $workerId): void
+    {
+        unset($this->consumerByWorker[$workerId]);
     }
 
     public function handleOutput(int $workerId, string $type, string $buffer): void
@@ -113,7 +126,8 @@ final class WorkerOutputHandler
             return;
         }
 
-        $payload = $this->formatter->format($workerId, $line);
+        $consumerLabel = $this->consumerByWorker[$workerId] ?? '';
+        $payload = $this->formatter->format($workerId, $consumerLabel, $line);
         $stream = $type === Process::ERR ? $this->stderrStream : $this->stdoutStream;
         fwrite($stream, $payload . PHP_EOL);
         fflush($stream);

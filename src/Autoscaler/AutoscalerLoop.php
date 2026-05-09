@@ -35,39 +35,66 @@ final class AutoscalerLoop
     public function start(): void
     {
         foreach ($this->pools as $pool) {
-            $this->strategies[$pool->transport()] = $this->strategyRegistry->build($pool->config->autoscaler->strategy);
+            $this->strategies[$pool->label()] = $this->strategyRegistry->build($pool->config->autoscaler->strategy);
         }
+
+        $this->emitInitialMetrics();
 
         $this->loop->addPeriodicTimer((float) $this->intervalSec, function (): void {
             $this->evaluate();
         });
     }
 
+    /**
+     * Emit pool-level gauges for every consumer at boot, before the first
+     * periodic evaluation. Without this, gauges are absent from /metrics for
+     * up to one autoscaler_interval_sec, which breaks Grafana dashboards that
+     * derive the consumer template variable from autoscaler_current_workers
+     * and starves Fixed-strategy pools of any visibility until they happen
+     * to tick. No strategy or setTarget side-effects: target stays at min.
+     */
+    private function emitInitialMetrics(): void
+    {
+        foreach ($this->pools as $pool) {
+            $target = $pool->getTarget();
+            $result = [
+                'previous' => $target,
+                'target' => $target,
+                'raw' => $target,
+                'clamped' => $target,
+                'stepped' => $target,
+                'applied' => false,
+                'skip_reason' => null,
+            ];
+            $this->emitMetrics($pool, $result, $target, $target);
+        }
+    }
+
     public function evaluate(): void
     {
         $now = (float) $this->clock->now()->format('U.u');
 
-        $desiredByTransport = [];
-        $poolsByTransport = [];
+        $desiredByConsumer = [];
+        $poolsByConsumer = [];
 
         foreach ($this->pools as $pool) {
             $pool->sample($now);
             $snapshot = $this->buildSnapshot($pool, $now);
-            $strategy = $this->strategies[$pool->transport()];
+            $strategy = $this->strategies[$pool->label()];
             $desired = $strategy->decide($snapshot);
-            $desiredByTransport[$pool->transport()] = $desired;
-            $poolsByTransport[$pool->transport()] = $pool;
+            $desiredByConsumer[$pool->label()] = $desired;
+            $poolsByConsumer[$pool->label()] = $pool;
         }
 
         if ($this->arbiter !== null) {
-            $allocated = $this->arbiter->allocate($desiredByTransport, $poolsByTransport);
+            $allocated = $this->arbiter->allocate($desiredByConsumer, $poolsByConsumer);
         } else {
-            $allocated = $desiredByTransport;
+            $allocated = $desiredByConsumer;
         }
 
-        foreach ($poolsByTransport as $transport => $pool) {
-            $allocatedTarget = $allocated[$transport];
-            $desired = $desiredByTransport[$transport];
+        foreach ($poolsByConsumer as $consumer => $pool) {
+            $allocatedTarget = $allocated[$consumer];
+            $desired = $desiredByConsumer[$consumer];
             $previousTarget = $pool->getTarget();
             $result = $pool->setTarget($allocatedTarget, $now);
 
@@ -76,7 +103,7 @@ final class AutoscalerLoop
             if ($result['applied']) {
                 $direction = $result['target'] > $previousTarget ? 'up' : 'down';
                 $this->logger->info('Autoscaler adjusted target.', [
-                    'transport' => $transport,
+                    'consumer' => $consumer,
                     'previous' => $previousTarget,
                     'target' => $result['target'],
                     'desired' => $desired,
@@ -94,11 +121,13 @@ final class AutoscalerLoop
         $lastDown = $pool->lastScaledDownAt();
 
         return new PoolSnapshot(
-            transport: $pool->transport(),
+            consumer: $pool->label(),
+            transports: $pool->transports(),
             currentWorkers: $pool->activeWorkerCount(),
             busyWorkers: $pool->smoothedBusy(),
             idleWorkers: $pool->smoothedIdle(),
             throughputPerSecond: $pool->smoothedThroughput(),
+            throughputByTransport: $pool->smoothedThroughputByTransport(),
             queueDepth: null,
             min: $auto->min,
             max: $auto->max,
@@ -113,8 +142,8 @@ final class AutoscalerLoop
      */
     private function emitMetrics(WorkerPool $pool, array $result, int $desired, int $allocated): void
     {
-        $transport = $pool->transport();
-        $labels = ['transport' => $transport];
+        $consumer = $pool->label();
+        $labels = ['consumer' => $consumer];
 
         $this->metrics->setGauge('autoscaler_target_workers', (float) $result['target'], 'Last autoscaler target after stability layer', $labels);
         $this->metrics->setGauge('autoscaler_current_workers', (float) $pool->activeWorkerCount(), 'Active worker count per pool', $labels);
@@ -133,7 +162,7 @@ final class AutoscalerLoop
             $this->metrics->incrementCounter(
                 'autoscaler_decisions_skipped',
                 'Autoscaler decisions skipped by stability layer',
-                ['transport' => $transport, 'reason' => $result['skip_reason']],
+                ['consumer' => $consumer, 'reason' => $result['skip_reason']],
             );
         }
     }

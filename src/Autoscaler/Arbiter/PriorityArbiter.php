@@ -17,18 +17,18 @@ final class PriorityArbiter
      * Arbitrate the desired worker counts across pools so the sum does not exceed
      * the total cap. Pools are grouped by priority; higher priorities are preferred.
      *
-     * @param array<string, int> $desired       transport => raw desired count
-     * @param array<string, WorkerPool> $pools  transport => pool (must include all transports in $desired)
-     * @return array<string, int>               transport => allocated count
+     * @param array<string, int> $desired       consumer-label => raw desired count
+     * @param array<string, WorkerPool> $pools  consumer-label => pool (must include all consumers in $desired)
+     * @return array<string, int>               consumer-label => allocated count
      */
     public function allocate(array $desired, array $pools): array
     {
         $allocated = [];
         $minSum = 0;
 
-        foreach ($pools as $transport => $pool) {
+        foreach ($pools as $consumer => $pool) {
             $min = $pool->config->autoscaler->min;
-            $allocated[$transport] = $min;
+            $allocated[$consumer] = $min;
             $minSum += $min;
         }
 
@@ -44,19 +44,19 @@ final class PriorityArbiter
 
         $groups = $this->groupByPriorityDesc($pools);
 
-        foreach ($groups as $priority => $transports) {
+        foreach ($groups as $priority => $consumers) {
             unset($priority);
 
             $demand = [];
             $totalDemand = 0;
 
-            foreach ($transports as $transport) {
-                $pool = $pools[$transport];
+            foreach ($consumers as $consumer) {
+                $pool = $pools[$consumer];
                 $minVal = $pool->config->autoscaler->min;
                 $maxVal = $pool->config->autoscaler->max;
-                $request = max($minVal, min($maxVal, $desired[$transport] ?? $minVal));
+                $request = max($minVal, min($maxVal, $desired[$consumer] ?? $minVal));
                 $aboveMin = max(0, $request - $minVal);
-                $demand[$transport] = $aboveMin;
+                $demand[$consumer] = $aboveMin;
                 $totalDemand += $aboveMin;
             }
 
@@ -65,8 +65,8 @@ final class PriorityArbiter
             }
 
             if ($totalDemand <= $remaining) {
-                foreach ($demand as $transport => $aboveMin) {
-                    $allocated[$transport] += $aboveMin;
+                foreach ($demand as $consumer => $aboveMin) {
+                    $allocated[$consumer] += $aboveMin;
                 }
                 $remaining -= $totalDemand;
                 continue;
@@ -77,28 +77,28 @@ final class PriorityArbiter
             $integerSum = 0;
             $remainders = [];
 
-            foreach ($demand as $transport => $aboveMin) {
+            foreach ($demand as $consumer => $aboveMin) {
                 $exact = ($remaining * $aboveMin) / $totalDemand;
                 $intPart = (int) floor($exact);
-                $shares[$transport] = $intPart;
-                $remainders[$transport] = $exact - $intPart;
+                $shares[$consumer] = $intPart;
+                $remainders[$consumer] = $exact - $intPart;
                 $integerSum += $intPart;
             }
 
             $leftover = $remaining - $integerSum;
 
-            $tieBreakOrder = $this->orderByLeftoverPreference($transports, $remainders, $pools);
+            $tieBreakOrder = $this->orderByLeftoverPreference($consumers, $remainders, $pools);
 
-            foreach ($tieBreakOrder as $transport) {
+            foreach ($tieBreakOrder as $consumer) {
                 if ($leftover <= 0) {
                     break;
                 }
-                $shares[$transport]++;
+                $shares[$consumer]++;
                 $leftover--;
             }
 
-            foreach ($shares as $transport => $share) {
-                $allocated[$transport] += $share;
+            foreach ($shares as $consumer => $share) {
+                $allocated[$consumer] += $share;
             }
 
             $remaining = 0;
@@ -109,15 +109,15 @@ final class PriorityArbiter
 
     /**
      * @param array<string, WorkerPool> $pools
-     * @return array<int, list<string>>  priority => list of transport names, ordered descending by priority
+     * @return array<int, list<string>>  priority => list of consumer labels, ordered descending by priority
      */
     private function groupByPriorityDesc(array $pools): array
     {
         $groups = [];
 
-        foreach ($pools as $transport => $pool) {
+        foreach ($pools as $consumer => $pool) {
             $priority = $pool->config->autoscaler->priority;
-            $groups[$priority][] = $transport;
+            $groups[$priority][] = $consumer;
         }
 
         krsort($groups);
@@ -126,19 +126,19 @@ final class PriorityArbiter
     }
 
     /**
-     * Order transports for tie-break leftover allocation:
+     * Order consumers for tie-break leftover allocation:
      * 1. Highest fractional remainder first.
      * 2. Then highest current worker count.
-     * 3. Then alphabetical by transport name.
+     * 3. Then alphabetical by consumer label.
      *
-     * @param list<string> $transports
+     * @param list<string> $consumers
      * @param array<string, float> $remainders
      * @param array<string, WorkerPool> $pools
      * @return list<string>
      */
-    private function orderByLeftoverPreference(array $transports, array $remainders, array $pools): array
+    private function orderByLeftoverPreference(array $consumers, array $remainders, array $pools): array
     {
-        usort($transports, static function (string $a, string $b) use ($remainders, $pools): int {
+        usort($consumers, static function (string $a, string $b) use ($remainders, $pools): int {
             $remCmp = ($remainders[$b] ?? 0.0) <=> ($remainders[$a] ?? 0.0);
             if ($remCmp !== 0) {
                 return $remCmp;
@@ -152,6 +152,6 @@ final class PriorityArbiter
             return strcmp($a, $b);
         });
 
-        return array_values($transports);
+        return array_values($consumers);
     }
 }

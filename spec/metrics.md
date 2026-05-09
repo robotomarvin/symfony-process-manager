@@ -24,6 +24,16 @@ Cumulative bucket counts plus `_sum` and `_count`. Buckets are sorted and dedupe
 
 ---
 
+## Label Conventions
+
+A **consumer** is one entry under `consumers:` — a logical pool that runs N worker processes, each consuming one or more Messenger transports in a single `messenger:consume` invocation. Three label conventions follow from this:
+
+- **Pool-level series** (one entry per consumer) carry only `{consumer}`. Examples: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand`, `worker_busy_workers`.
+- **Process-level series** also carry only `{consumer}` (no `transport` label). One worker process consumes every transport in the consumer's list, so process lifecycle events — `worker_starts_total`, `worker_failures_total`, `worker_backoffs_total` — fire once per process, not per transport. Fanning them across the transport list would inflate `rate()` queries by the transport-list-length factor without adding signal. `worker_exits_total` adds `{consumer, exit_code}` for the same reason. For transport-level failure visibility, see `messenger_messages_failed_total{transport, message_class}`.
+- **Per-message series** carry `{consumer, transport}` (or `{worker, consumer, transport}` for `worker_busy`). The `transport` label is the real receiver reported by the worker via IPC on each `MessengerEventMessage`, so cardinality matches actual message volume rather than configured transport-list length.
+
+---
+
 ## Exposed Metrics
 
 ### `process_manager_running`
@@ -44,64 +54,62 @@ Set to `1.0` at startup and `0.0` when `ShutdownState::isRequested()` becomes tr
 
 ### `worker_starts_total`
 
-**Type:** Counter  
-**Labels:** `transport`  
-**Description:** Total number of times a worker process was (re)started for the given transport.
+**Type:** Counter
+**Labels:** `consumer`
+**Description:** Total number of times a worker process was (re)started. Process-level event — no transport label, since one worker handles every transport in the consumer's list.
 
 ```
 # HELP worker_starts_total Total number of worker process starts
 # TYPE worker_starts_total counter
-worker_starts_total{transport="async"} 5
-worker_starts_total{transport="priority"} 2
+worker_starts_total{consumer="async"} 5
+worker_starts_total{consumer="ingest"} 3
 ```
 
-Incremented in `startWorker()` each time a worker subprocess is launched.
+For transport-level message visibility, see `messages_processed_total{consumer, transport}` and `messenger_messages_failed_total{transport, message_class}`.
 
 ---
 
 ### `worker_exits_total`
 
-**Type:** Counter  
-**Labels:** `exit_code`  
-**Description:** Total number of worker process exits, broken down by exit code.
+**Type:** Counter
+**Labels:** `consumer`, `exit_code`
+**Description:** Total number of worker process exits, broken down by consumer and exit code. Process-level event — no transport fan-out.
 
 ```
 # HELP worker_exits_total Total number of worker process exits
 # TYPE worker_exits_total counter
-worker_exits_total{exit_code="0"} 3
-worker_exits_total{exit_code="1"} 2
+worker_exits_total{consumer="async",exit_code="0"} 3
+worker_exits_total{consumer="async",exit_code="1"} 2
 ```
-
-Incremented in `handleWorkerExit()` with the actual exit code of the subprocess as a string label.
 
 ---
 
 ### `worker_failures_total`
 
-**Type:** Counter  
-**Labels:** `transport`  
-**Description:** Total number of worker failures (non-zero exits) for the given transport.
+**Type:** Counter
+**Labels:** `consumer`
+**Description:** Total number of worker failures (non-zero exits). Process-level event — no transport label.
 
 ```
 # HELP worker_failures_total Total number of worker failures (non-zero exits)
 # TYPE worker_failures_total counter
-worker_failures_total{transport="async"} 2
+worker_failures_total{consumer="async"} 2
 ```
 
-Incremented alongside `worker_exits_total` when exit code != 0.
+Incremented alongside `worker_exits_total` when exit code != 0. For transport-level failure visibility see `messenger_messages_failed_total{transport,message_class}`.
 
 ---
 
 ### `worker_backoffs_total`
 
-**Type:** Counter  
-**Labels:** `transport`  
-**Description:** Total number of times a worker restart was delayed due to backoff.
+**Type:** Counter
+**Labels:** `consumer`
+**Description:** Total number of times a worker restart was delayed due to backoff. Process-level event — no transport label.
 
 ```
 # HELP worker_backoffs_total Total number of times a worker restart was backed off
 # TYPE worker_backoffs_total counter
-worker_backoffs_total{transport="async"} 2
+worker_backoffs_total{consumer="async"} 2
 ```
 
 Incremented when a failure is recorded but the failure limit is not yet reached and a backoff delay is scheduled.
@@ -143,13 +151,32 @@ Updated in `handleIpcMessage()` when a `PongMessage` is received. Cleared when t
 
 ---
 
+### `messages_processed_total`
+
+**Type:** Counter
+**Labels:** `consumer`, `transport`
+**Description:** Total Messenger messages successfully processed. The `transport` label is the real receiver name reported by the worker via IPC (no fan-out), so multi-transport consumers expose one series per transport with independent counts.
+
+```
+# HELP messages_processed_total Total messages processed by workers
+# TYPE messages_processed_total counter
+messages_processed_total{consumer="async",transport="async"} 1427
+messages_processed_total{consumer="ingest",transport="orders"} 932
+messages_processed_total{consumer="ingest",transport="payments"} 514
+```
+
+Incremented by `ProcessManagerLoop::handleIpcMessage()` when a `MessengerEventMessage` arrives with `event=handled`, using `$message->transport` for the label.
+
+---
+
+
 ### `worker_busy`
 
 **Type:** Gauge
-**Labels:** `worker`, `transport`
-**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). Cleared when the worker process exits — including draining workers, which keep emitting busy/idle transitions through the drain window so operators can observe drain progress per worker.
+**Labels:** `worker`, `consumer`, `transport`
+**Description:** Per-worker busy state (1.0 while a message is being handled, 0.0 otherwise). The `transport` label is the IPC-reported receiver of the message currently in flight, so a multi-transport worker exposes a different series per transport over its lifetime.
 
-Set on `MessengerEventMessage` with `event=received` (busy); cleared on `event=handled` or `event=failed` (idle).
+Set on `MessengerEventMessage` with `event=received` (busy); cleared on `event=handled` or `event=failed` (idle). Cleared when the worker process exits, including for draining workers that emit further busy/idle transitions during the drain window.
 
 ---
 
@@ -237,15 +264,17 @@ messenger_messages_in_flight{transport="async"} 3
 ### `worker_busy_workers`
 
 **Type:** Gauge
-**Labels:** `transport`
-**Description:** Count of currently-busy workers per pool, set by the autoscaler on each evaluation. Includes draining workers still finishing their last message — a worker handling a message is busy regardless of whether it is being torn down. Distinct from the strategy-snapshot view (`autoscaler_current_workers`), which excludes draining workers because they are not future capacity.
+**Labels:** `consumer`
+**Description:** Count of currently-busy workers per consumer pool, set by the autoscaler on each evaluation. Includes draining workers still finishing their last message — a worker handling a message is busy regardless of whether it is being torn down. Distinct from the strategy-snapshot view (`autoscaler_current_workers`), which excludes draining workers because they are not future capacity.
+
+All four pool-level gauges (`worker_busy_workers`, `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand`) are emitted once at autoscaler startup — before the first periodic evaluation — and refreshed every `autoscaler_interval_sec`. The startup emission ensures every consumer is visible to scrapers and Grafana dashboards from t=0, including Fixed-strategy pools that may not produce a target change for a long time.
 
 ---
 
 ### `autoscaler_target_workers`
 
 **Type:** Gauge
-**Labels:** `transport`
+**Labels:** `consumer`
 **Description:** Last autoscaler decision after the stability layer (clamp/step/cooldowns).
 
 ---
@@ -253,15 +282,15 @@ messenger_messages_in_flight{transport="async"} 3
 ### `autoscaler_current_workers`
 
 **Type:** Gauge
-**Labels:** `transport`
-**Description:** Active worker count per pool, excluding draining workers.
+**Labels:** `consumer`
+**Description:** Active worker count per consumer pool, excluding draining workers.
 
 ---
 
 ### `autoscaler_unmet_demand`
 
 **Type:** Gauge
-**Labels:** `transport`
+**Labels:** `consumer`
 **Description:** `desired - allocated` per autoscaler evaluation, after `PriorityArbiter`. Always 0 when `total_cap` is unset.
 
 ---
@@ -269,7 +298,7 @@ messenger_messages_in_flight{transport="async"} 3
 ### `autoscaler_scale_up_total` / `autoscaler_scale_down_total`
 
 **Type:** Counter
-**Labels:** `transport`
+**Labels:** `consumer`
 **Description:** Number of scale-up / scale-down events applied (after stability layer). Skipped decisions (cooldown, step cap, at min/max) are not counted here.
 
 ---
@@ -277,7 +306,7 @@ messenger_messages_in_flight{transport="async"} 3
 ### `autoscaler_decisions_skipped_total`
 
 **Type:** Counter
-**Labels:** `transport`, `reason`
+**Labels:** `consumer`, `reason`
 **Description:** Number of autoscaler decisions skipped by the stability layer.
 
 `reason` values:
@@ -313,9 +342,10 @@ Rules:
 
 | Label | Values | Notes |
 |---|---|---|
-| `transport` | Transport name as configured (e.g., `async`) | Set at worker start; persists for the process lifetime |
+| `consumer` | Consumer label as configured (the YAML key under `consumers:`) | Identifies the pool (one entry per pool, regardless of how many transports it reads from) |
+| `transport` | Symfony Messenger transport name | Carried only on per-message metrics (`messages_processed_total`, `worker_busy`, the `messenger_*` suite); the value is the real receiver reported by the worker via IPC. Worker-lifecycle metrics (`worker_starts_total`, `worker_exits_total`, `worker_failures_total`, `worker_backoffs_total`) do **not** carry this label — they are process-level and keyed by `{consumer}` only |
 | `exit_code` | String integer (e.g., `"0"`, `"1"`, `"143"`) | SIGTERM exit is typically 143 (128+15) |
-| `worker` | String integer worker ID (e.g., `"0"`, `"1"`) | IDs are 0-based, scoped per transport |
+| `worker` | String integer worker ID (e.g., `"0"`, `"1"`) | IDs are unique across all consumers |
 | `message_class` | Message FQCN, or `"other"` when whitelist is set and FQCN matches no entry | Cardinality controlled by `metrics.messages.whitelist` |
 | `le` | Histogram bucket upper bound, or `+Inf` | Internal label emitted only on `<name>_bucket` lines |
 | `reason` | Autoscaler skip reason | See `autoscaler_decisions_skipped_total` |
@@ -326,19 +356,21 @@ Rules:
 
 `docker/grafana/provisioning/dashboards/process-manager.json` exposes these metrics in three rows:
 
-- **Stat header** — `process_manager_running`, `messenger_messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
-- **Messages** — `messenger_messages_processed_total`, `messenger_messages_failed_total`, `messenger_messages_retried_total`, `messenger_messages_in_flight`, and `messenger_message_duration_seconds` quantiles per transport.
-- **Worker Lifecycle** — `worker_starts_total`, `worker_exits_total` by `exit_code`, `worker_failures_total` + `worker_backoffs_total`.
+All dashboard panels filter on the `$consumer` template variable, which is populated from `label_values(autoscaler_current_workers, consumer)`.
+
+- **Stat header** — `process_manager_running`, `messages_processed_total`, `worker_last_pong_timestamp` (active worker count), `worker_failures_total`, `worker_backoffs_total`.
+- **Messages** — `messages_processed_total` per `(consumer, transport)` (per-message metric, real transport from IPC, no fan-out), and the `messenger_*` suite (`messenger_messages_processed_total`, `messenger_messages_failed_total`, `messenger_messages_retried_total`, `messenger_messages_in_flight`, `messenger_message_duration_seconds` quantiles) per transport / `message_class`.
+- **Worker Lifecycle** — `worker_starts_total`, `worker_exits_total` by `exit_code`, `worker_failures_total` + `worker_backoffs_total`. All four are consumer-keyed (no transport label), so panels use plain `sum by(consumer) (rate(...{consumer=~"$consumer"}[...]))`. For transport-level failure breakdown use `messenger_messages_failed_total{transport,message_class}`.
 - **Autoscaler** —
-  - Stat row: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand` (summed across selected transports).
-  - *Workers per Transport* — stacked `autoscaler_current_workers` with dashed `autoscaler_target_workers` overlay (stepAfter).
+  - Stat row: `autoscaler_target_workers`, `autoscaler_current_workers`, `autoscaler_unmet_demand` (summed across selected consumers).
+  - *Workers per Consumer* — stacked `autoscaler_current_workers` with dashed `autoscaler_target_workers` overlay (stepAfter).
   - *Pool Utilization* — `worker_busy_workers / autoscaler_current_workers`, percentunit, thresholds 0.7 / 0.85 / 0.95.
   - *Busy vs Idle Workers* — stacked `worker_busy_workers` and `current − busy`.
   - *Scale Events / min* — rate of `autoscaler_scale_up_total` and `autoscaler_scale_down_total`.
   - *Skipped Decisions / min by Reason* — stacked rate of `autoscaler_decisions_skipped_total` by `reason`.
 - **Worker Liveness** — `time() − worker_last_pong_timestamp` per worker.
 
-The dashboard relies on the autoscaler emitting `autoscaler_current_workers` for **every** configured transport, including pools using the Fixed strategy — `AutoscalerLoop` evaluates all pools registered through `services.yaml`, so this holds without special-casing.
+The dashboard relies on the autoscaler emitting `autoscaler_current_workers` for **every** configured consumer, including pools using the Fixed strategy — `AutoscalerLoop` evaluates all pools registered through `services.yaml`, so this holds without special-casing.
 
 ---
 

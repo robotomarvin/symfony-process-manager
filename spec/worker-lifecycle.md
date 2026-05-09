@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each configured transport with `processes: N` results in N independent `WorkerState` instances. They are managed by `ProcessManagerLoop` through a tick-based state machine.
+Each configured consumer with `processes: N` (or `autoscaler: { min: M, ... }`) results in N (or M, growing up to `max`) independent `WorkerState` instances inside a single `WorkerPool`. Each worker is one OS subprocess; for a multi-transport consumer the same subprocess consumes every transport in the consumer's `transports` list. Pools are managed by `ProcessManagerLoop` through a tick-based state machine.
 
 ---
 
@@ -42,7 +42,7 @@ Each configured transport with `processes: N` results in N independent `WorkerSt
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `int` | Immutable worker identifier (sequential per transport, 0-based) |
+| `id` | `int` | Immutable worker identifier (globally unique across all consumer pools, allocated at startup) |
 | `process` | `?Process` | symfony/process handle while running; null otherwise |
 | `inputStream` | `?InputStream` | ReactPHP InputStream for IPC downlink (stdin of worker) |
 | `failureTimestamps` | `float[]` | Unix timestamps of recent non-zero exits |
@@ -57,15 +57,15 @@ Each configured transport with `processes: N` results in N independent `WorkerSt
 
 ### Worker Start (`startWorker`)
 
-1. Create a `symfony/process` instance via `WorkerProcessFactoryInterface::create(transport, consumeArgs)`.
-2. The command constructed: `[PHP_BINARY, bin/console, messenger:consume, transport, ...consumeArgs->toCliArguments()]`
+1. Create a `symfony/process` instance via `WorkerProcessFactoryInterface::create(list<string> $transports, ConsumeArgs $consumeArgs)`.
+2. The command constructed: `[PHP_BINARY, bin/console, messenger:consume, ...$transports, ...consumeArgs->toCliArguments()]` — each transport in the consumer's list becomes a positional arg.
 3. No timeout, no idle timeout; output enabled.
-4. Register stdout/stderr callbacks with `WorkerOutputHandler`.
+4. Register stdout/stderr callbacks with `WorkerOutputHandler` and call `WorkerOutputHandler::registerWorker($workerId, $consumer->label)` so log forwarding can prefix the consumer.
 5. Create a `React\Stream\InputStream` and pass it as process stdin.
 6. Register the stream in `IpcFanout` for this worker ID.
 7. Call `process->start()`.
 8. Call `WorkerState::markStarted()` (sets `stopped=false`).
-9. Increment `worker_starts_total{transport=...}` counter.
+9. Increment `worker_starts_total{consumer}` once. Process-level event — no transport fan-out.
 
 ### Worker Running
 
@@ -80,12 +80,13 @@ On each tick for a running worker:
 
 Triggered when `isRunning()` returns false on a previously running worker:
 
-1. Flush remaining buffered output via `WorkerOutputHandler::flush(workerId)`.
+1. Flush remaining buffered output via `WorkerOutputHandler::flush(workerId)`, then `WorkerOutputHandler::unregisterWorker(workerId)`.
 2. Unregister from `IpcFanout`.
 3. Clear the InputStream from WorkerState.
 4. Clear the Process from WorkerState.
-5. Increment `worker_exits_total{exit_code=N}` counter.
-6. Branch on exit code:
+5. Remove `worker_busy{worker, consumer, transport}` gauges (one per transport in the consumer's list) and `worker_last_pong_timestamp{worker}`.
+6. Increment `worker_exits_total{consumer, exit_code}` once.
+7. Branch on exit code:
 
 **Exit code 0:**
 - `WorkerState::clearFailures()` — reset failure timestamps
@@ -95,7 +96,7 @@ Triggered when `isRunning()` returns false on a previously running worker:
 **Exit code != 0:**
 - `WorkerState::recordFailure()` — append current timestamp to `failureTimestamps`
 - Prune timestamps older than `failureWindowSeconds`
-- Increment `worker_failures_total{transport=...}` counter
+- Increment `worker_failures_total{consumer}` once. Process-level event — no transport fan-out.
 - Count remaining timestamps
 - If `count > failureLimit`:
   - Log error: failure limit exceeded, shutting down
@@ -103,7 +104,7 @@ Triggered when `isRunning()` returns false on a previously running worker:
   - Mark worker as stopped (no restart)
 - Else:
   - Calculate backoff delay: `min(backoff_base × 2^(count - 1), backoff_max)`
-  - Increment `worker_backoffs_total{transport=...}` counter
+  - Increment `worker_backoffs_total{consumer}` once
   - `WorkerState::scheduleRestart(now, delay)`
   - Log warning: worker failed, will retry in Xs
 
@@ -168,12 +169,13 @@ Workers are expected to handle SIGTERM gracefully and exit within a reasonable t
 The subprocess command built by `WorkerProcessFactory`:
 
 ```
-<PHP_BINARY> <project_dir>/bin/console messenger:consume <transport> [queues...] \
+<PHP_BINARY> <project_dir>/bin/console messenger:consume <transport_1> [<transport_2> ...] [queues...] \
   [--memory-limit=<N>] [--time-limit=<N>] [--limit=<N>] [--sleep=<N>] \
   [extra_flags...]
 ```
 
-- Queues are passed as positional arguments (before flags).
+- Each transport in the consumer's `transports` list becomes a positional arg, in order. Symfony Messenger polls listed transports in this exact order each loop iteration and processes the first available message — so list order is priority order, not round-robin. `t1` is fully drained before `t2` gets a turn. For fair sharing across transports, split into separate consumers.
+- Queues are appended after the transport list (still positional, before flags).
 - `extra` entries are appended verbatim after all other flags.
 - `null` values for optional args are omitted entirely.
 - Working directory: project root (from `KernelInterface::getProjectDir()`).

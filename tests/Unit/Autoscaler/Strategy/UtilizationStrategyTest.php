@@ -90,11 +90,13 @@ final class UtilizationStrategyTest extends TestCase
     private function snapshotAt(int $current, float $busy): PoolSnapshot
     {
         return new PoolSnapshot(
-            transport: 'async',
+            consumer: 'async',
+            transports: ['async'],
             currentWorkers: $current,
             busyWorkers: $busy,
             idleWorkers: max(0.0, $current - $busy),
             throughputPerSecond: 0.0,
+            throughputByTransport: ['async' => 0.0],
             queueDepth: null,
             min: 1,
             max: 100,

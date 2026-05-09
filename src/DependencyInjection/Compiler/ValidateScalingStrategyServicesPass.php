@@ -17,23 +17,23 @@ final class ValidateScalingStrategyServicesPass implements CompilerPassInterface
         /** @var array<string, list<string>> $required */
         $required = $container->getParameter(SymfonyProcessManagerExtension::PARAM_REQUIRED_STRATEGY_SERVICES);
 
-        foreach ($required as $serviceId => $transports) {
-            $this->validate($container, $serviceId, $transports);
+        foreach ($required as $serviceId => $consumers) {
+            $this->validate($container, $serviceId, $consumers);
         }
 
         $container->getParameterBag()->remove(SymfonyProcessManagerExtension::PARAM_REQUIRED_STRATEGY_SERVICES);
     }
 
     /**
-     * @param list<string> $transports
+     * @param list<string> $consumers
      */
-    private function validate(ContainerBuilder $container, string $serviceId, array $transports): void
+    private function validate(ContainerBuilder $container, string $serviceId, array $consumers): void
     {
         if (!$container->hasDefinition($serviceId) && !$container->hasAlias($serviceId)) {
             throw new InvalidArgumentException(sprintf(
-                'Autoscaler strategy service "%s" referenced by transport(s) [%s] is not defined.',
+                'Autoscaler strategy service "%s" referenced by consumer(s) [%s] is not defined.',
                 $serviceId,
-                implode(', ', $transports),
+                implode(', ', $consumers),
             ));
         }
 
@@ -53,10 +53,10 @@ final class ValidateScalingStrategyServicesPass implements CompilerPassInterface
         }
 
         throw new InvalidArgumentException(sprintf(
-            'Autoscaler strategy service "%s" referenced by transport(s) [%s] must implement %s. '
+            'Autoscaler strategy service "%s" referenced by consumer(s) [%s] must implement %s. '
             . 'Implement the interface (autoconfigure tags it automatically) or tag the service with "%s" manually.',
             $serviceId,
-            implode(', ', $transports),
+            implode(', ', $consumers),
             ScalingStrategyInterface::class,
             ScalingStrategyInterface::TAG,
         ));

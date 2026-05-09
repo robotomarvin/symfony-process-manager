@@ -7,7 +7,7 @@
 The bundle exposes a single console command, `pm:serve`, which:
 
 1. Starts a ReactPHP HTTP server for health checks and Prometheus metrics.
-2. Spawns N worker subprocesses per configured transport (each runs `messenger:consume`).
+2. Spawns N worker subprocesses per configured **consumer**. Each worker runs `messenger:consume <transports...>`, where `<transports...>` is the consumer's transport list (one or more). Messenger polls listed transports in order and takes the first available message, so list order is priority order — `t1` is fully drained before `t2` gets a turn (no round-robin, no fair sharing).
 3. Monitors workers in a tick-based event loop, restarting them according to a configurable restart policy.
 4. Handles graceful shutdown on SIGTERM, draining all workers before exiting.
 
@@ -29,10 +29,10 @@ The bundle exposes a single console command, `pm:serve`, which:
         │  GET /metrics       │         │  spawn / restart workers │
         └──────────┬──────────┘         │  SIGTERM drain          │
                    │                   └──────────┬──────────────┘
-        ┌──────────▼──────────┐                   │ spawns ×N per transport
+        ┌──────────▼──────────┐                   │ spawns ×N per consumer
         │   MetricsRegistry   │         ┌──────────▼─────────────────────┐
         │                     │         │    Worker (symfony/process)     │
-        │   Counter[]         │◄────────┤    messenger:consume <name>     │
+        │   Counter[]         │◄────────┤    messenger:consume <t1> <t2>  │
         │   Gauge[]           │ metrics │                                │
         └─────────────────────┘ update  │  stdout/stderr → OutputHandler │
                                         │  stdin         ← IpcFanout     │
@@ -46,7 +46,8 @@ The bundle exposes a single console command, `pm:serve`, which:
 | `Command\` | CLI entrypoint only; wires DI dependencies and starts the loop |
 | `ProcessManager\` | Core tick-based state machine; `ProcessManagerLoop`, `WorkerState`, `ShutdownState` |
 | `Worker\` | Process creation (`WorkerProcessFactory`) and in-worker IPC event subscriber (`WorkerIpcSubscriber`) |
-| `Transport\` | Value objects for transport config (`TransportConfig`, `ConsumeArgs`) |
+| `Consumer\` | Consumer-pool config value object (`ConsumerConfig` — label + transport list + lifecycle/backoff/autoscaler config) |
+| `Transport\` | `ConsumeArgs` value object (CLI flag mapping for `messenger:consume`) |
 | `Ipc\` | IPC codec, messages, fanout, and worker context |
 | `Output\` | Worker stdout/stderr capture, formatting, and IPC line extraction |
 | `Http\` | ReactPHP HTTP server for health and metrics |
@@ -67,8 +68,8 @@ pm:serve
   └─► ProcessManagerLoop::run()
         │
         ├─► installSignalHandler()   — SIGTERM -> ShutdownState::request(SIGNAL)
-        ├─► initializeWorkers()      — create WorkerState for each (transport × N)
-        └─► loop->addPeriodicTimer() — tick every min(poll_interval_ms) across transports
+        ├─► initializeWorkers()      — create one WorkerPool per consumer; each pool seeds N WorkerState (one process per worker, multi-transport workers consume the full transport list)
+        └─► loop->addPeriodicTimer() — tick every min(poll_interval_ms) across consumers
 ```
 
 ### Per-Tick Execution (`tick()`)
@@ -115,8 +116,8 @@ Worker stdout/stderr
         └─ on complete line:
               ├─ IpcCodec::isIpcLine()? → decode → queue as IpcMessage
               └─ non-IPC → WorkerOutputFormatter::format()
-                    ├─ valid JSON object → inject worker_id into extra{}
-                    └─ plain text → prepend "[worker N] "
+                    ├─ valid JSON object → inject worker_id and consumer into extra{}
+                    └─ plain text → prepend "[worker N consumer-label] "
                     → write to STDOUT/STDERR
 ```
 
@@ -133,12 +134,17 @@ ProcessManagerLoop::maybeSendPing()
 ### IPC Message Flow (Worker → Manager)
 
 ```
-Worker emits ProcessedCommandMessage / PongMessage to stdout
+Worker emits MessengerEventMessage / PongMessage to stdout
   └─► WorkerOutputHandler detects @spm: prefix → queues IpcMessage
         └─► ProcessManagerLoop::dispatchIpcMessages()
               └─► handleIpcMessage()
                     ├─ PongMessage → WorkerState::setLastPongAt()
-                    └─ ProcessedCommandMessage → metrics update
+                    └─ MessengerEventMessage → switch(event):
+                          ├─ received → mark Busy; worker_busy{worker, consumer, transport}=1
+                          ├─ handled  → mark Idle; pool->recordMessageProcessed(message.transport);
+                          │             messages_processed_total{consumer, transport}++
+                          ├─ failed   → mark Idle; pool->recordMessageProcessed(message.transport)
+                          └─ retried  → (no busy/idle change)
 ```
 
 ---

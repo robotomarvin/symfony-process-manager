@@ -7,7 +7,7 @@ Symfony bundle that runs and supervises Symfony Messenger workers as subprocesse
 
 `pm:serve` starts an event loop that:
 
-- spawns `messenger:consume` processes per configured transport
+- spawns `messenger:consume` processes per configured **consumer** (each consumer reads one or more transports)
 - restarts workers on exit (immediate restart for exit code 0, exponential backoff for non-zero exits)
 - shuts down gracefully on SIGTERM
 - exposes a small HTTP server for health and Prometheus metrics
@@ -54,9 +54,10 @@ symfony_process_manager:
       whitelist: []
       duration_buckets: [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60]
 
-  transports:
+  consumers:
     async:
-      # Static pool (legacy form)
+      # Static, single-transport consumer (scalar form)
+      transports: async
       processes: 2
       failure_limit: 3
       failure_window: 60
@@ -70,8 +71,15 @@ symfony_process_manager:
         sleep: null
         queues: []
         extra: []
+    ingest:
+      # Multi-transport consumer: one process consumes both transports.
+      # Messenger polls them in list order — `orders` drains before
+      # `payments` gets attention. List order = priority.
+      transports: [orders, payments]
+      processes: 2
     priority:
-      # Autoscaled pool
+      # Autoscaled consumer
+      transports: priority
       autoscaler:
         min: 1
         max: 5
@@ -102,9 +110,11 @@ symfony_process_manager:
   - Otherwise each entry is either an exact FQCN or a glob (`*` / `?` resolved with `fnmatch`); message classes that match nothing are bucketed under `message_class="other"`.
 - `metrics.messages.duration_buckets` (list of floats, default `[0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60]`) — histogram bucket bounds in seconds. Sorted and deduped on load; `+Inf` is appended automatically by the renderer.
 
-### Transport Options
+### Consumer Options
 
-Each entry under `transports` configures one `messenger:consume <transport>` pool. A transport must use **either** `processes` (static) **or** `autoscaler` (dynamic) — never both.
+Each entry under `consumers` configures one pool of `messenger:consume <transports...>` worker processes. A consumer must use **either** `processes` (static) **or** `autoscaler` (dynamic) — never both.
+
+- `transports` (string | list<string>, required) — one or more Symfony Messenger transport names this consumer reads from. A scalar is normalized to a one-element list (`transports: failed` ≡ `transports: [failed]`). Multi-transport consumers run a single PHP process per worker that polls all listed transports (`bin/console messenger:consume t1 t2 ...`). **List order is priority order**: Messenger polls transports in the order given and picks the first available message, so `t1` is fully drained before `t2` gets a turn — useful for primary/fallback (e.g. `[main, failed]`), not for fair sharing. If you need fair sharing, give each transport its own consumer. All other consumer fields apply to the whole pool — `consume_args` cannot vary per transport.
 
 Static (legacy) options:
 
@@ -124,7 +134,7 @@ Static (legacy) options:
 
 ### Autoscaler Options
 
-`transports.<name>.autoscaler` enables dynamic worker scaling for that pool.
+`consumers.<label>.autoscaler` enables dynamic worker scaling for that pool.
 
 - `min` (int, required) — lower bound; autoscaled pools start at this count
 - `max` (int, required) — upper bound
@@ -164,8 +174,8 @@ This starts the HTTP server and begins supervising worker processes.
 
 Worker output is forwarded to the parent process stdout/stderr.
 
-- JSON log lines are enriched with `extra.worker_id`.
-- Non-JSON lines are prefixed with `[worker N]`.
+- JSON log lines are enriched with `extra.worker_id` and `extra.consumer`.
+- Non-JSON lines are prefixed with `[worker N <consumer>]`.
 
 ## Metrics
 
@@ -174,13 +184,14 @@ The `/metrics` endpoint exposes Prometheus metrics including:
 Process manager:
 
 - `process_manager_running` (gauge)
-- `worker_starts_total{transport=...}` (counter)
-- `worker_exits_total{exit_code=...}` (counter)
-- `worker_failures_total{transport=...}` (counter)
-- `worker_backoffs_total{transport=...}` (counter)
+- `worker_starts_total{consumer=...}` (counter) — process-level event, no transport label
+- `worker_exits_total{consumer=...,exit_code=...}` (counter)
+- `worker_failures_total{consumer=...}` (counter) — process-level; for transport-level failures see `messenger_messages_failed_total`
+- `worker_backoffs_total{consumer=...}` (counter) — process-level
 - `worker_sigkills_total` (counter)
+- `messages_processed_total{consumer=...,transport=...}` (counter) — labelled with the real transport reported by the worker (no fan-out)
 - `worker_last_pong_timestamp{worker=...}` (gauge) — cleared on worker exit
-- `worker_busy{worker=...,transport=...}` (gauge, 0/1) — cleared on worker exit
+- `worker_busy{worker=...,consumer=...,transport=...}` (gauge, 0/1) — cleared on worker exit; `transport` is the transport reported by the IPC message
 
 Messenger messages (gated by `metrics.messages.enabled`):
 
@@ -190,15 +201,62 @@ Messenger messages (gated by `metrics.messages.enabled`):
 - `messenger_message_duration_seconds{transport, message_class}` (histogram, observed on `handled` and `failed`)
 - `messenger_messages_in_flight{transport}` (gauge, incremented on `received`, decremented on `handled`/`failed`)
 
-Autoscaler:
+Autoscaler (pool-level — one entry per consumer):
 
-- `autoscaler_target_workers{transport=...}` (gauge) — last decision after the stability layer
-- `autoscaler_current_workers{transport=...}` (gauge) — active worker count, excluding draining
-- `autoscaler_unmet_demand{transport=...}` (gauge) — `desired - allocated` after arbitration
-- `autoscaler_scale_up_total{transport=...}` (counter)
-- `autoscaler_scale_down_total{transport=...}` (counter)
-- `autoscaler_decisions_skipped_total{transport=...,reason=...}` (counter) — reasons: `cooldown_up`, `cooldown_down`, `step_cap`, `at_min`, `at_max`
-- `worker_busy_workers{transport=...}` (gauge)
+- `autoscaler_target_workers{consumer=...}` (gauge) — last decision after the stability layer
+- `autoscaler_current_workers{consumer=...}` (gauge) — active worker count, excluding draining
+- `autoscaler_unmet_demand{consumer=...}` (gauge) — `desired - allocated` after arbitration
+- `autoscaler_scale_up_total{consumer=...}` (counter)
+- `autoscaler_scale_down_total{consumer=...}` (counter)
+- `autoscaler_decisions_skipped_total{consumer=...,reason=...}` (counter) — reasons: `cooldown_up`, `cooldown_down`, `step_cap`, `at_min`, `at_max`
+- `worker_busy_workers{consumer=...}` (gauge)
+
+## Upgrading
+
+### Breaking: `transports:` renamed to `consumers:`
+
+Pre-1.0 breaking change. The root config key `transports:` became `consumers:`, and each consumer must declare its `transports:` field explicitly (scalar or list). There is no backward-compatibility shim — old config will fail validation with `Unrecognized option "transports" under "symfony_process_manager"`.
+
+Before:
+
+```yaml
+symfony_process_manager:
+  transports:
+    failed:
+      processes: 1
+    async:
+      processes: 2
+```
+
+After:
+
+```yaml
+symfony_process_manager:
+  consumers:
+    failed:
+      transports: failed       # scalar shorthand
+      processes: 1
+    async:
+      transports: [async]      # list form is also valid
+      processes: 2
+```
+
+Multi-transport consumers (one process consumes several transports in list order — earlier transports have priority and drain before later ones get a turn) become possible:
+
+```yaml
+consumers:
+  ingest:
+    transports: [orders, payments]
+    processes: 2
+```
+
+Metric and log label changes that ship with the rename:
+
+- All `{transport=...}` labels on supervisor and autoscaler metrics are now `{consumer=...}` (pool-level) or `{consumer=...,transport=...}` (per-transport, fanned across the consumer's transports).
+- `messages_processed_total{consumer,transport}` uses the real transport the worker reported via IPC, not the consumer label.
+- `worker_busy{worker,consumer,transport}` is now keyed by IPC-reported transport.
+- Non-JSON worker log lines are now prefixed `[worker N consumer-label]` (was `[worker N]`).
+- JSON log lines now carry both `extra.worker_id` and `extra.consumer`.
 
 ## Development
 

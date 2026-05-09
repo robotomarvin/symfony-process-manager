@@ -17,13 +17,15 @@ final class WorkerProcessFactory implements WorkerProcessFactoryInterface
         $this->projectDir = $kernel->getProjectDir();
     }
 
-    public function create(string $transport, ConsumeArgs $consumeArgs): Process
+    public function create(array $transports, ConsumeArgs $consumeArgs): Process
     {
+        assert($transports !== [], 'transports must be a non-empty list');
+
         $command = [
             PHP_BINARY,
             $this->projectDir . '/bin/console',
             'messenger:consume',
-            $transport,
+            ...$transports,
             ...$consumeArgs->toCliArguments(),
         ];
 

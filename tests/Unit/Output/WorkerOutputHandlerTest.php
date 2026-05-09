@@ -42,13 +42,15 @@ final class WorkerOutputHandlerTest extends TestCase
             $this->stdoutStream,
             $this->stderrStream,
         );
+        $this->handler->registerWorker(1, 'async');
+        $this->handler->registerWorker(2, 'async');
     }
 
     public function testHandleOutputWritesCompleteLineToStdoutStream(): void
     {
         $this->handler->handleOutput(1, Process::OUT, "hello world\n");
 
-        self::assertSame("[worker 1] hello world" . PHP_EOL, $this->readStream($this->stdoutStream));
+        self::assertSame("[worker 1 async] hello world" . PHP_EOL, $this->readStream($this->stdoutStream));
         self::assertSame('', $this->readStream($this->stderrStream));
     }
 
@@ -57,7 +59,7 @@ final class WorkerOutputHandlerTest extends TestCase
         $this->handler->handleOutput(1, Process::ERR, "error message\n");
 
         self::assertSame('', $this->readStream($this->stdoutStream));
-        self::assertSame("[worker 1] error message" . PHP_EOL, $this->readStream($this->stderrStream));
+        self::assertSame("[worker 1 async] error message" . PHP_EOL, $this->readStream($this->stderrStream));
     }
 
     public function testHandleOutputBuffersIncompleteLines(): void
@@ -72,14 +74,14 @@ final class WorkerOutputHandlerTest extends TestCase
         $this->handler->handleOutput(1, Process::OUT, 'partial data');
         $this->handler->flush(1);
 
-        self::assertSame("[worker 1] partial data" . PHP_EOL, $this->readStream($this->stdoutStream));
+        self::assertSame("[worker 1 async] partial data" . PHP_EOL, $this->readStream($this->stdoutStream));
     }
 
     public function testMultipleLinesInSingleBufferAreForwardedIndividually(): void
     {
         $this->handler->handleOutput(1, Process::OUT, "line one\nline two\n");
 
-        $expected = "[worker 1] line one" . PHP_EOL . "[worker 1] line two" . PHP_EOL;
+        $expected = "[worker 1 async] line one" . PHP_EOL . "[worker 1 async] line two" . PHP_EOL;
         self::assertSame($expected, $this->readStream($this->stdoutStream));
     }
 
@@ -122,7 +124,7 @@ final class WorkerOutputHandlerTest extends TestCase
         $ipcLine = $this->ipcCodec->encode(new MessengerEventMessage('handled', 'TestCmd', 'async'));
         $this->handler->handleOutput(1, Process::OUT, "normal log\n" . $ipcLine . "\nanother log\n");
 
-        $expected = "[worker 1] normal log" . PHP_EOL . "[worker 1] another log" . PHP_EOL;
+        $expected = "[worker 1 async] normal log" . PHP_EOL . "[worker 1 async] another log" . PHP_EOL;
         self::assertSame($expected, $this->readStream($this->stdoutStream));
 
         $messages = $this->handler->getAndClearIpcMessages(1);
@@ -158,6 +160,24 @@ final class WorkerOutputHandlerTest extends TestCase
 
         self::assertCount(1, $this->handler->getAndClearIpcMessages(1));
         self::assertCount(2, $this->handler->getAndClearIpcMessages(2));
+    }
+
+    public function testRegisterWorkerThreadsConsumerLabelToFormatter(): void
+    {
+        $this->handler->registerWorker(7, 'ingest');
+        $this->handler->handleOutput(7, Process::OUT, "hello\n");
+
+        self::assertSame('[worker 7 ingest] hello' . PHP_EOL, $this->readStream($this->stdoutStream));
+    }
+
+    public function testUnregisterWorkerStopsAttachingConsumerLabel(): void
+    {
+        $this->handler->registerWorker(7, 'ingest');
+        $this->handler->unregisterWorker(7);
+        $this->handler->handleOutput(7, Process::OUT, "hello\n");
+
+        // Falls back to empty consumer label when not registered.
+        self::assertSame('[worker 7 ] hello' . PHP_EOL, $this->readStream($this->stdoutStream));
     }
 
     /**

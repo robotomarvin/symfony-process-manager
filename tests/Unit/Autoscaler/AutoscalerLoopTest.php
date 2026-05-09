@@ -13,13 +13,13 @@ use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Autoscaler\AutoscalerLoop;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyRegistry;
+use SymfonyProcessManager\Consumer\ConsumerConfig;
 use SymfonyProcessManager\Metrics\MetricFactory;
 use SymfonyProcessManager\Metrics\MetricsRegistry;
 use SymfonyProcessManager\Metrics\PrometheusTextRenderer;
 use SymfonyProcessManager\ProcessManager\WorkerPool;
 use SymfonyProcessManager\Tests\Support\AutoAdvancingClock;
 use SymfonyProcessManager\Tests\Support\FakeLoop;
-use SymfonyProcessManager\Transport\TransportConfig;
 
 #[CoversClass(AutoscalerLoop::class)]
 final class AutoscalerLoopTest extends TestCase
@@ -71,14 +71,16 @@ final class AutoscalerLoopTest extends TestCase
 
         // 1 busy worker / 0.7 = 2 → pool can step to 5 (max), but starts at 1 → scaleUpStep=100, so jumps.
         self::assertGreaterThan(1, $pool->getTarget());
-        self::assertStringContainsString('autoscaler_target_workers', $metrics->toPrometheusText());
+        $output = $metrics->toPrometheusText();
+        self::assertStringContainsString('autoscaler_target_workers{consumer="async"}', $output);
+        self::assertStringContainsString('autoscaler_current_workers{consumer="async"}', $output);
     }
 
     public function testEvaluateUsesArbiterWhenProvided(): void
     {
         $clock = new AutoAdvancingClock(1000.0, 0.0);
-        $high = $this->makePool(min: 1, max: 10, priority: 100, scaleUpStep: 100, scaleUpCooldownSec: 0, transport: 'high');
-        $low = $this->makePool(min: 1, max: 10, priority: 0, scaleUpStep: 100, scaleUpCooldownSec: 0, transport: 'low');
+        $high = $this->makePool(min: 1, max: 10, priority: 100, scaleUpStep: 100, scaleUpCooldownSec: 0, label: 'high');
+        $low = $this->makePool(min: 1, max: 10, priority: 0, scaleUpStep: 100, scaleUpCooldownSec: 0, label: 'low');
 
         // Both pools have all workers busy → both want 2.
         $high->workers()[0]->markBusy();
@@ -107,7 +109,7 @@ final class AutoscalerLoopTest extends TestCase
     public function testFixedStrategyHoldsTargetSteady(): void
     {
         $clock = new AutoAdvancingClock(1000.0, 0.0);
-        $pool = $this->makePool(min: 3, max: 3, scaleUpStep: 100, transport: 'async', strategy: StrategyConfig::fixed(3));
+        $pool = $this->makePool(min: 3, max: 3, scaleUpStep: 100, label: 'async', strategy: StrategyConfig::fixed(3));
 
         $metrics = new MetricsRegistry(new PrometheusTextRenderer(), new MetricFactory());
         $autoscaler = new AutoscalerLoop(
@@ -134,7 +136,7 @@ final class AutoscalerLoopTest extends TestCase
         int $priority = 0,
         int $scaleUpStep = 2,
         int $scaleUpCooldownSec = 30,
-        string $transport = 'async',
+        string $label = 'async',
         ?StrategyConfig $strategy = null,
     ): WorkerPool {
         $autoscaler = new AutoscalerConfig(
@@ -148,7 +150,7 @@ final class AutoscalerLoopTest extends TestCase
             scaleDownStep: 1,
             strategy: $strategy ?? StrategyConfig::utilization(0.7),
         );
-        $config = TransportConfig::create(transport: $transport, autoscaler: $autoscaler);
+        $config = ConsumerConfig::create(label: $label, autoscaler: $autoscaler);
 
         return new WorkerPool($config, 1);
     }

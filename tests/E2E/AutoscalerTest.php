@@ -48,7 +48,7 @@ final class AutoscalerTest extends TestCase
             // Wait for the initial scalable worker to start.
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 5.0,
             );
 
@@ -58,7 +58,7 @@ final class AutoscalerTest extends TestCase
             // Wait for the autoscaler to apply a scale-up decision.
             $scaleUp = $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['direction'] ?? null) === 'up',
                 10.0,
             );
@@ -68,7 +68,7 @@ final class AutoscalerTest extends TestCase
             // autoscaler decision; wait for an additional scalable worker (id > 2).
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && (int) ($r['context']['worker'] ?? 0) > 2,
                 10.0,
             );
@@ -76,11 +76,11 @@ final class AutoscalerTest extends TestCase
             // /metrics should reflect the new worker count and scale-up counter.
             $metrics = $this->fetchMetrics($address);
             self::assertMatchesRegularExpression(
-                '/autoscaler_scale_up_total\{transport="scalable"\} \d+/',
+                '/autoscaler_scale_up_total\{consumer="scalable"\} \d+/',
                 $metrics,
             );
             self::assertMatchesRegularExpression(
-                '/autoscaler_target_workers\{transport="scalable"\} ([2-9]|\d{2,})/',
+                '/autoscaler_target_workers\{consumer="scalable"\} ([2-9]|\d{2,})/',
                 $metrics,
                 'autoscaler_target_workers should be at least 2 after scale-up',
             );
@@ -89,7 +89,7 @@ final class AutoscalerTest extends TestCase
             $startedScalable = array_filter(
                 $session->getRecords(),
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
             );
             self::assertGreaterThanOrEqual(2, count($startedScalable));
         } finally {
@@ -107,7 +107,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 5.0,
             );
 
@@ -116,7 +116,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['direction'] ?? null) === 'up',
                 10.0,
             );
@@ -127,7 +127,7 @@ final class AutoscalerTest extends TestCase
             // multiple ticks to reach min=1, so wait for target == min.
             $scaleDown = $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['direction'] ?? null) === 'down'
                     && ($r['context']['target'] ?? null) === 1,
                 15.0,
@@ -136,7 +136,7 @@ final class AutoscalerTest extends TestCase
 
             $metrics = $this->fetchMetrics($address);
             self::assertMatchesRegularExpression(
-                '/autoscaler_scale_down_total\{transport="scalable"\} \d+/',
+                '/autoscaler_scale_down_total\{consumer="scalable"\} \d+/',
                 $metrics,
             );
         } finally {
@@ -160,7 +160,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 5.0,
             );
 
@@ -169,7 +169,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['target'] ?? null) === 3,
                 20.0,
             );
@@ -177,7 +177,7 @@ final class AutoscalerTest extends TestCase
             // Once the queue drains, first scale-down step should be 3 → 2.
             $firstDown = $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['direction'] ?? null) === 'down',
                 30.0,
             );
@@ -187,7 +187,7 @@ final class AutoscalerTest extends TestCase
             // Second scale-down step should be 2 → 1, and must wait for the cooldown.
             $secondDown = $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable'
+                    && ($r['context']['consumer'] ?? null) === 'scalable'
                     && ($r['context']['direction'] ?? null) === 'down',
                 20.0,
             );
@@ -217,7 +217,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 5.0,
             );
 
@@ -226,17 +226,17 @@ final class AutoscalerTest extends TestCase
             // Wait until at least one busy event is emitted by the autoscaler tick.
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 10.0,
             );
 
             $metrics = $this->fetchMetrics($address);
             self::assertMatchesRegularExpression(
-                '/worker_busy_workers\{transport="scalable"\} \d+/',
+                '/worker_busy_workers\{consumer="scalable"\} \d+/',
                 $metrics,
             );
             self::assertMatchesRegularExpression(
-                '/autoscaler_unmet_demand\{transport="scalable"\} \d+/',
+                '/autoscaler_unmet_demand\{consumer="scalable"\} \d+/',
                 $metrics,
             );
         } finally {
@@ -246,10 +246,10 @@ final class AutoscalerTest extends TestCase
 
     public function testTotalCapClampsScalablePoolBelowAutoscalerDemand(): void
     {
-        // Combined fixture pools: async (fixed, processes=1) + scalable (autoscaler min=1, max=3).
-        // The "test_capped" env overlay sets total_cap=2, which leaves 1 worker above min for the
-        // higher-priority fixed pool's siblings — scalable can never grow past min=1 even when
-        // its strategy demands more.
+        // Combined fixture pools: async + multi (each fixed processes=1) + scalable (autoscaler
+        // min=1, max=3). The "test_capped" env overlay sets total_cap=3, exactly the sum of mins,
+        // leaving zero headroom — scalable can never grow past min=1 even when its strategy
+        // demands more.
         $runner = new ConsoleProcessRunner();
         $session = $runner->start('pm:serve', env: ['APP_ENV' => 'test_capped']);
 
@@ -258,7 +258,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 5.0,
             );
 
@@ -271,7 +271,7 @@ final class AutoscalerTest extends TestCase
             $matched = false;
             while ((microtime(true) - $start) < 20.0) {
                 $body = $this->fetchMetrics($address);
-                if (preg_match('/autoscaler_unmet_demand\{transport="scalable"\} ([1-9])/', $body) === 1) {
+                if (preg_match('/autoscaler_unmet_demand\{consumer="scalable"\} ([1-9])/', $body) === 1) {
                     $matched = true;
                     break;
                 }
@@ -279,12 +279,12 @@ final class AutoscalerTest extends TestCase
             }
             self::assertTrue(
                 $matched,
-                'Expected autoscaler_unmet_demand{transport="scalable"} >= 1 under capped load. Metrics: ' . $body,
+                'Expected autoscaler_unmet_demand{consumer="scalable"} >= 1 under capped load. Metrics: ' . $body,
             );
 
             // Scalable pool target must remain at min=1 because the cap leaves no room above min.
             self::assertMatchesRegularExpression(
-                '/autoscaler_target_workers\{transport="scalable"\} 1\b/',
+                '/autoscaler_target_workers\{consumer="scalable"\} 1\b/',
                 $body,
             );
 
@@ -292,7 +292,7 @@ final class AutoscalerTest extends TestCase
             $startedScalable = array_filter(
                 $session->getRecords(),
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
             );
             self::assertCount(1, $startedScalable, 'Cap must prevent a second scalable worker from spawning.');
         } finally {
@@ -310,7 +310,7 @@ final class AutoscalerTest extends TestCase
 
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Worker started.'
-                    && ($r['context']['transport'] ?? null) === 'async',
+                    && ($r['context']['consumer'] ?? null) === 'async',
                 5.0,
             );
 
@@ -319,22 +319,22 @@ final class AutoscalerTest extends TestCase
             // Give the autoscaler a few cycles to evaluate.
             $session->waitForRecord(
                 static fn(array $r): bool => $r['message'] === 'Autoscaler adjusted target.'
-                    && ($r['context']['transport'] ?? null) === 'scalable',
+                    && ($r['context']['consumer'] ?? null) === 'scalable',
                 10.0,
             );
 
             // The async pool is a static `processes: 1` pool; it should never scale.
             $metrics = $this->fetchMetrics($address);
             self::assertMatchesRegularExpression(
-                '/autoscaler_target_workers\{transport="async"\} 1/',
+                '/autoscaler_target_workers\{consumer="async"\} 1/',
                 $metrics,
             );
             self::assertMatchesRegularExpression(
-                '/autoscaler_current_workers\{transport="async"\} 1/',
+                '/autoscaler_current_workers\{consumer="async"\} 1/',
                 $metrics,
             );
             self::assertDoesNotMatchRegularExpression(
-                '/autoscaler_scale_up_total\{transport="async"\}/',
+                '/autoscaler_scale_up_total\{consumer="async"\}/',
                 $metrics,
             );
         } finally {

@@ -13,28 +13,29 @@ use SymfonyProcessManager\DependencyInjection\Configuration;
 #[CoversClass(Configuration::class)]
 final class ConfigurationTest extends TestCase
 {
-    public function testMinimalConfigWithOneTransportUsesDefaults(): void
+    public function testMinimalConsumerWithScalarTransport(): void
     {
         $config = $this->process([
-            'transports' => [
-                'async' => null,
+            'consumers' => [
+                'async' => ['transports' => 'async'],
             ],
         ]);
 
-        self::assertArrayHasKey('transports', $config);
-        self::assertCount(1, $config['transports']);
-        self::assertArrayHasKey('async', $config['transports']);
+        self::assertArrayHasKey('consumers', $config);
+        self::assertCount(1, $config['consumers']);
+        self::assertArrayHasKey('async', $config['consumers']);
 
-        $transport = $config['transports']['async'];
-        self::assertNull($transport['processes']);
-        self::assertSame(3, $transport['failure_limit']);
-        self::assertSame(60, $transport['failure_window']);
-        self::assertSame(1, $transport['backoff_base']);
-        self::assertSame(30, $transport['backoff_max']);
-        self::assertSame(200, $transport['poll_interval_ms']);
-        self::assertArrayNotHasKey('autoscaler', $transport);
+        $consumer = $config['consumers']['async'];
+        self::assertSame(['async'], $consumer['transports']);
+        self::assertNull($consumer['processes']);
+        self::assertSame(3, $consumer['failure_limit']);
+        self::assertSame(60, $consumer['failure_window']);
+        self::assertSame(1, $consumer['backoff_base']);
+        self::assertSame(30, $consumer['backoff_max']);
+        self::assertSame(200, $consumer['poll_interval_ms']);
+        self::assertArrayNotHasKey('autoscaler', $consumer);
 
-        $consumeArgs = $transport['consume_args'];
+        $consumeArgs = $consumer['consume_args'];
         self::assertNull($consumeArgs['memory_limit']);
         self::assertNull($consumeArgs['time_limit']);
         self::assertNull($consumeArgs['limit']);
@@ -43,11 +44,28 @@ final class ConfigurationTest extends TestCase
         self::assertSame([], $consumeArgs['extra']);
     }
 
+    public function testMultiTransportConsumerWithListTransports(): void
+    {
+        $config = $this->process([
+            'consumers' => [
+                'ingest' => [
+                    'transports' => ['orders', 'payments'],
+                    'processes' => 2,
+                ],
+            ],
+        ]);
+
+        $consumer = $config['consumers']['ingest'];
+        self::assertSame(['orders', 'payments'], $consumer['transports']);
+        self::assertSame(2, $consumer['processes']);
+    }
+
     public function testFullConfigWithAllOptionsSpecified(): void
     {
         $config = $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'processes' => 4,
                     'failure_limit' => 5,
                     'failure_window' => 120,
@@ -66,15 +84,16 @@ final class ConfigurationTest extends TestCase
             ],
         ]);
 
-        $transport = $config['transports']['async'];
-        self::assertSame(4, $transport['processes']);
-        self::assertSame(5, $transport['failure_limit']);
-        self::assertSame(120, $transport['failure_window']);
-        self::assertSame(2, $transport['backoff_base']);
-        self::assertSame(60, $transport['backoff_max']);
-        self::assertSame(500, $transport['poll_interval_ms']);
+        $consumer = $config['consumers']['async'];
+        self::assertSame(['async'], $consumer['transports']);
+        self::assertSame(4, $consumer['processes']);
+        self::assertSame(5, $consumer['failure_limit']);
+        self::assertSame(120, $consumer['failure_window']);
+        self::assertSame(2, $consumer['backoff_base']);
+        self::assertSame(60, $consumer['backoff_max']);
+        self::assertSame(500, $consumer['poll_interval_ms']);
 
-        $consumeArgs = $transport['consume_args'];
+        $consumeArgs = $consumer['consume_args'];
         self::assertSame(256, $consumeArgs['memory_limit']);
         self::assertSame(3600, $consumeArgs['time_limit']);
         self::assertSame(100, $consumeArgs['limit']);
@@ -83,15 +102,14 @@ final class ConfigurationTest extends TestCase
         self::assertSame(['--no-reset'], $consumeArgs['extra']);
     }
 
-    public function testMultipleTransports(): void
+    public function testMultipleConsumers(): void
     {
         $config = $this->process([
-            'transports' => [
-                'async' => [
-                    'processes' => 2,
-                ],
-                'failed' => null,
+            'consumers' => [
+                'async' => ['transports' => 'async', 'processes' => 2],
+                'failed' => ['transports' => 'failed'],
                 'priority' => [
+                    'transports' => 'priority',
                     'processes' => 3,
                     'consume_args' => [
                         'memory_limit' => 512,
@@ -101,24 +119,22 @@ final class ConfigurationTest extends TestCase
             ],
         ]);
 
-        self::assertCount(3, $config['transports']);
-        self::assertArrayHasKey('async', $config['transports']);
-        self::assertArrayHasKey('failed', $config['transports']);
-        self::assertArrayHasKey('priority', $config['transports']);
+        self::assertCount(3, $config['consumers']);
+        self::assertSame(['async'], $config['consumers']['async']['transports']);
+        self::assertSame(['failed'], $config['consumers']['failed']['transports']);
+        self::assertSame(['priority'], $config['consumers']['priority']['transports']);
 
-        self::assertSame(2, $config['transports']['async']['processes']);
-        self::assertNull($config['transports']['failed']['processes']);
-        self::assertSame(3, $config['transports']['priority']['processes']);
-        self::assertSame(512, $config['transports']['priority']['consume_args']['memory_limit']);
-        self::assertSame(['urgent'], $config['transports']['priority']['consume_args']['queues']);
+        self::assertSame(2, $config['consumers']['async']['processes']);
+        self::assertNull($config['consumers']['failed']['processes']);
+        self::assertSame(3, $config['consumers']['priority']['processes']);
+        self::assertSame(512, $config['consumers']['priority']['consume_args']['memory_limit']);
+        self::assertSame(['urgent'], $config['consumers']['priority']['consume_args']['queues']);
     }
 
     public function testDefaultShutdownTimeoutIs30(): void
     {
         $config = $this->process([
-            'transports' => [
-                'async' => null,
-            ],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame(30, $config['shutdown_timeout']);
@@ -128,9 +144,7 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'shutdown_timeout' => 90,
-            'transports' => [
-                'async' => null,
-            ],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame(90, $config['shutdown_timeout']);
@@ -140,9 +154,7 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'shutdown_timeout' => 0,
-            'transports' => [
-                'async' => null,
-            ],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame(0, $config['shutdown_timeout']);
@@ -154,32 +166,52 @@ final class ConfigurationTest extends TestCase
 
         $this->process([
             'shutdown_timeout' => -1,
-            'transports' => [
-                'async' => null,
-            ],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
     }
 
-    public function testEmptyTransportsThrowsException(): void
+    public function testEmptyConsumersThrowsException(): void
     {
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [],
+            'consumers' => [],
         ]);
     }
 
-    public function testMissingTransportsThrowsException(): void
+    public function testMissingConsumersThrowsException(): void
     {
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([]);
     }
 
+    public function testMissingTransportsOnConsumerIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'consumers' => [
+                'async' => ['processes' => 1],
+            ],
+        ]);
+    }
+
+    public function testEmptyTransportsListIsInvalid(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->process([
+            'consumers' => [
+                'async' => ['transports' => []],
+            ],
+        ]);
+    }
+
     public function testAutoscalerIntervalDefaultsToTen(): void
     {
         $config = $this->process([
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame(10, $config['autoscaler_interval_sec']);
@@ -188,7 +220,7 @@ final class ConfigurationTest extends TestCase
     public function testTotalCapDefaultsToNull(): void
     {
         $config = $this->process([
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertNull($config['total_cap']);
@@ -197,8 +229,9 @@ final class ConfigurationTest extends TestCase
     public function testAutoscalerBlockParses(): void
     {
         $config = $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'autoscaler' => [
                         'min' => 1,
                         'max' => 10,
@@ -217,9 +250,9 @@ final class ConfigurationTest extends TestCase
             ],
         ]);
 
-        $transport = $config['transports']['async'];
-        self::assertArrayHasKey('autoscaler', $transport);
-        $autoscaler = $transport['autoscaler'] ?? null;
+        $consumer = $config['consumers']['async'];
+        self::assertArrayHasKey('autoscaler', $consumer);
+        $autoscaler = $consumer['autoscaler'] ?? null;
         self::assertNotNull($autoscaler);
         self::assertSame(1, $autoscaler['min']);
         self::assertSame(10, $autoscaler['max']);
@@ -239,8 +272,9 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'autoscaler' => [
                         'max' => 5,
                         'strategy' => ['type' => 'utilization'],
@@ -255,8 +289,9 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'autoscaler' => [
                         'min' => 10,
                         'max' => 5,
@@ -272,8 +307,9 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'processes' => 3,
                     'autoscaler' => [
                         'min' => 1,
@@ -290,8 +326,9 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'autoscaler' => [
                         'min' => 1,
                         'max' => 5,
@@ -307,8 +344,9 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidConfigurationException::class);
 
         $this->process([
-            'transports' => [
+            'consumers' => [
                 'async' => [
+                    'transports' => 'async',
                     'autoscaler' => [
                         'min' => 1,
                         'max' => 5,
@@ -326,8 +364,9 @@ final class ConfigurationTest extends TestCase
 
         $this->process([
             'total_cap' => 3,
-            'transports' => [
+            'consumers' => [
                 'a' => [
+                    'transports' => 'a',
                     'autoscaler' => [
                         'min' => 2,
                         'max' => 5,
@@ -335,6 +374,7 @@ final class ConfigurationTest extends TestCase
                     ],
                 ],
                 'b' => [
+                    'transports' => 'b',
                     'autoscaler' => [
                         'min' => 2,
                         'max' => 5,
@@ -352,9 +392,10 @@ final class ConfigurationTest extends TestCase
 
         $this->process([
             'total_cap' => 3,
-            'transports' => [
-                'fixed' => ['processes' => 2],
+            'consumers' => [
+                'fixed' => ['transports' => 'fixed', 'processes' => 2],
                 'auto' => [
+                    'transports' => 'auto',
                     'autoscaler' => [
                         'min' => 2,
                         'max' => 5,
@@ -369,9 +410,10 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'total_cap' => 4,
-            'transports' => [
-                'fixed' => ['processes' => 2],
+            'consumers' => [
+                'fixed' => ['transports' => 'fixed', 'processes' => 2],
                 'auto' => [
+                    'transports' => 'auto',
                     'autoscaler' => [
                         'min' => 2,
                         'max' => 5,
@@ -387,7 +429,7 @@ final class ConfigurationTest extends TestCase
     public function testMessagesMetricsDefaults(): void
     {
         $config = $this->process([
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         $messages = $config['metrics']['messages'];
@@ -400,7 +442,7 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'metrics' => ['messages' => ['enabled' => false]],
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertFalse($config['metrics']['messages']['enabled']);
@@ -410,7 +452,7 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'metrics' => ['messages' => ['whitelist' => ['App\\Foo', 'App\\Email\\*']]],
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame(['App\\Foo', 'App\\Email\\*'], $config['metrics']['messages']['whitelist']);
@@ -420,7 +462,7 @@ final class ConfigurationTest extends TestCase
     {
         $config = $this->process([
             'metrics' => ['messages' => ['duration_buckets' => [1.0, 0.5, 0.5, 0.1]]],
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
 
         self::assertSame([0.1, 0.5, 1.0], $config['metrics']['messages']['duration_buckets']);
@@ -432,7 +474,7 @@ final class ConfigurationTest extends TestCase
 
         $this->process([
             'metrics' => ['messages' => ['duration_buckets' => []]],
-            'transports' => ['async' => null],
+            'consumers' => ['async' => ['transports' => 'async']],
         ]);
     }
 
@@ -444,7 +486,8 @@ final class ConfigurationTest extends TestCase
      *     autoscaler_interval_sec: int,
      *     http_server: array{host: string, port: int},
      *     metrics: array{messages: array{enabled: bool, whitelist: list<string>, duration_buckets: list<float>}},
-     *     transports: array<string, array{
+     *     consumers: array<string, array{
+     *         transports: list<string>,
      *         processes: ?int,
      *         failure_limit: int,
      *         failure_window: int,
@@ -483,7 +526,8 @@ final class ConfigurationTest extends TestCase
          *     autoscaler_interval_sec: int,
          *     http_server: array{host: string, port: int},
          *     metrics: array{messages: array{enabled: bool, whitelist: list<string>, duration_buckets: list<float>}},
-         *     transports: array<string, array{
+         *     consumers: array<string, array{
+         *         transports: list<string>,
          *         processes: ?int,
          *         failure_limit: int,
          *         failure_window: int,
