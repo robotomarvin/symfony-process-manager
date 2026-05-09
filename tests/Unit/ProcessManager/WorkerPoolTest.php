@@ -6,6 +6,7 @@ namespace SymfonyProcessManager\Tests\Unit\ProcessManager;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 use SymfonyProcessManager\Autoscaler\AutoscalerConfig;
 use SymfonyProcessManager\Autoscaler\Strategy\StrategyConfig;
 use SymfonyProcessManager\Consumer\ConsumerConfig;
@@ -318,6 +319,103 @@ final class WorkerPoolTest extends TestCase
         // Subsequent ProcessedCommandMessage flips it back.
         $draining[0]->markIdle();
         self::assertSame(0, $pool->busyWorkerCount(), 'ground-truth gauge follows worker until exit');
+    }
+
+    public function testReapDrainedRemovesOnlyWorkersWithoutProcess(): void
+    {
+        $pool = $this->buildPool(min: 3, max: 5);
+        $pool->drainAll();
+        $draining = $pool->drainingWorkers();
+        self::assertCount(3, $draining);
+
+        // Workers 0 and 2 still have an attached process (loop has not yet cleaned them up).
+        // Worker 1's process was cleared after exit.
+        $draining[0]->setProcess($this->createMock(Process::class));
+        $draining[2]->setProcess($this->createMock(Process::class));
+
+        $pool->reapDrained();
+
+        $remaining = $pool->drainingWorkers();
+        self::assertCount(2, $remaining, 'only the worker without a process is reaped');
+        $remainingIds = array_map(static fn($w) => $w->id, $remaining);
+        self::assertContains($draining[0]->id, $remainingIds);
+        self::assertContains($draining[2]->id, $remainingIds);
+        self::assertNotContains($draining[1]->id, $remainingIds);
+    }
+
+    public function testReapDrainedOnEmptyDrainingListIsNoOp(): void
+    {
+        $pool = $this->buildPool(min: 2, max: 5);
+
+        $pool->reapDrained();
+
+        self::assertSame([], $pool->drainingWorkers());
+        self::assertSame(2, $pool->activeWorkerCount());
+    }
+
+    public function testSetTargetRecordsLastScaleUpTimestampOnApply(): void
+    {
+        $pool = $this->buildPool(min: 1, max: 10, scaleUpStep: 100, scaleDownStep: 100);
+        self::assertSame(0.0, $pool->lastScaledUpAt());
+        self::assertSame(0.0, $pool->lastScaledDownAt());
+
+        $pool->setTarget(5, 100.0);
+
+        self::assertSame(100.0, $pool->lastScaledUpAt());
+        self::assertSame(0.0, $pool->lastScaledDownAt(), 'down timestamp untouched on scale-up');
+    }
+
+    public function testSetTargetRecordsLastScaleDownTimestampOnApply(): void
+    {
+        $pool = $this->buildPool(
+            min: 1,
+            max: 10,
+            scaleUpStep: 100,
+            scaleDownStep: 100,
+            scaleUpCooldownSec: 0,
+            scaleDownCooldownSec: 0,
+        );
+        $pool->setTarget(5, 100.0);
+        $upAt = $pool->lastScaledUpAt();
+
+        $pool->setTarget(2, 500.0);
+
+        self::assertSame(500.0, $pool->lastScaledDownAt());
+        self::assertSame($upAt, $pool->lastScaledUpAt(), 'up timestamp untouched on scale-down');
+    }
+
+    public function testSetTargetDoesNotRecordTimestampWhenSkipped(): void
+    {
+        $pool = $this->buildPool(min: 1, max: 3, scaleUpStep: 10, scaleDownStep: 10, scaleUpCooldownSec: 0);
+        $pool->setTarget(3, 100.0);
+        $upAt = $pool->lastScaledUpAt();
+        self::assertSame(100.0, $upAt);
+
+        // at_max: stepped collapses to previous, must not advance the timestamp.
+        $skipped = $pool->setTarget(10, 200.0);
+        self::assertSame('at_max', $skipped['skip_reason']);
+        self::assertSame($upAt, $pool->lastScaledUpAt(), 'skipped scale must not record a timestamp');
+    }
+
+    public function testNextWorkerIdMonotonicAcrossDrainAndScaleUpCycles(): void
+    {
+        $pool = $this->buildPool(min: 1, max: 10, scaleUpStep: 100, scaleDownStep: 100, scaleDownCooldownSec: 0);
+
+        // Initial: 1 worker with id 1. Scale up to 3 -> ids 1,2,3.
+        $pool->setTarget(3, 100.0);
+        $firstCycleIds = array_map(static fn($w) => $w->id, $pool->workers());
+        self::assertSame([1, 2, 3], $firstCycleIds);
+
+        // Drain everyone and reap once their processes are cleared.
+        $pool->drainAll();
+        $pool->reapDrained();
+        self::assertSame(0, $pool->activeWorkerCount());
+        self::assertSame([], $pool->drainingWorkers());
+
+        // Scale back up. New ids must continue from 4, never reuse 1..3.
+        $pool->setTarget(2, 200.0);
+        $secondCycleIds = array_map(static fn($w) => $w->id, $pool->workers());
+        self::assertSame([4, 5], $secondCycleIds, 'nextWorkerId monotonic across drain+rescale');
     }
 
     private function buildPool(

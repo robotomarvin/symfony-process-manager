@@ -148,6 +148,18 @@ final class WorkerStateTest extends TestCase
         self::assertSame(2, $state->getFailureCount());
     }
 
+    public function testRecordFailureKeepsTimestampAtExactWindowBoundary(): void
+    {
+        $state = WorkerState::create(1);
+
+        // Filter is `timestamp >= now - window`, so the boundary is inclusive.
+        $state->recordFailure(1000.0, 60);
+        $state->recordFailure(1060.0, 60);
+
+        // 1000.0 is exactly at (1060 - 60); must still count.
+        self::assertSame(2, $state->getFailureCount());
+    }
+
     public function testClearFailuresResetsCountToZero(): void
     {
         $state = WorkerState::create(1);
@@ -237,6 +249,23 @@ final class WorkerStateTest extends TestCase
         self::assertFalse($state->isBusy());
     }
 
+    public function testMarkStartedClearsBothBusyAndStopSignalSentInOneCall(): void
+    {
+        // Restart path runs after a worker exited mid-message: prior state is
+        // stopSignalSent=true and runState=Busy. A single markStarted() must clear both.
+        $state = WorkerState::create(1);
+        $state->markBusy();
+        $state->markStopSignalSent();
+        self::assertTrue($state->isBusy());
+        self::assertTrue($state->isStopSignalSent());
+
+        $state->markStarted();
+
+        self::assertFalse($state->isBusy());
+        self::assertSame(WorkerRunState::Idle, $state->getRunState());
+        self::assertFalse($state->isStopSignalSent());
+    }
+
     public function testMarkDrainingMarksStoppedAndDraining(): void
     {
         $state = WorkerState::create(1);
@@ -245,6 +274,21 @@ final class WorkerStateTest extends TestCase
 
         self::assertTrue($state->isDraining());
         self::assertFalse($state->shouldStart(0.0));
+    }
+
+    public function testMarkDrainingSetsStoppedFlagIndependentOfNextStartAt(): void
+    {
+        // shouldStart() returns false when (process==null && !stopped && nextStartAt<=now).
+        // Schedule an immediate restart so nextStartAt<=now, then markDraining(): the only
+        // remaining gate that can block shouldStart() is the stopped flag set by markDraining().
+        $state = WorkerState::create(1);
+        $state->scheduleImmediateRestart(0.0);
+        self::assertTrue($state->shouldStart(0.0), 'precondition: would start before draining');
+
+        $state->markDraining();
+
+        self::assertFalse($state->shouldStart(0.0), 'markDraining must set stopped flag');
+        self::assertTrue($state->isDraining());
     }
 
     public function testLastPongLifecycle(): void
